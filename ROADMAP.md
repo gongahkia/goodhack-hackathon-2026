@@ -107,7 +107,11 @@ The North Star metric is **caregiver-hours saved per week** while maintaining or
 
 - **Real NEHR integration** via Synapxe partnership.
 - **B2B2C distribution** through polyclinics, hospital discharge planning teams, and AIC.
-- **Native mobile / Expo companion app** as a separate client against the existing FastAPI backend. The current product remains a responsive Next.js web app optimized for Vercel/Node deployment; Expo would require replacing Next.js routing, DOM/browser APIs (`window.print`, file inputs, iframe embeds, localStorage), FullCalendar's web component, Tailwind/shadcn web styling, and HTML-first attachment flows. Reuse the API contracts, shared data types, i18n strings, and product flow, but build a dedicated React Native/Expo frontend rather than converting the web app in place.
+- **Native mobile / Expo companion app** as a separate client against the existing FastAPI backend.
+  - Current deployment fit: the v1 product remains a responsive Next.js 14 App Router web app for Vercel or a Node/Next host, backed by FastAPI on Render/Fly/Railway-style infrastructure and Supabase Postgres. The mobile UX is a phone-sized responsive web shell, but still browser-based.
+  - Reusable pieces for Expo: API contracts in `frontend/lib/api.ts`, data types in `frontend/lib/types.ts`, i18n strings in `frontend/lib/i18n.tsx` after adapting storage/provider concerns, and the product flow/screen structure.
+  - Expo replacement work: Next.js routing/pages, DOM/browser APIs such as `window.print`, file inputs, iframe embeds, and `localStorage`, FullCalendar's web component, Tailwind/shadcn web styling, HTML anchors/forms, and web-only attachment handling.
+  - Recommended path: deploy the MVP as web first; if native mobile is needed, build a dedicated `mobile/` Expo app against the existing FastAPI backend rather than converting the Next.js frontend in place.
 - **Expansion to chronic disease management** beyond elderly (diabetes, oncology survivorship, mental health).
 - **Regional expansion** to Malaysia, Indonesia, Thailand — Sea-Lion's multilingual capability becomes a strategic moat.
 - **Predictive health insights** at the population level (privacy-preserving, opt-in) — caregiving signal is a uniquely undertapped dataset.
