@@ -13,9 +13,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <LanguageProvider>
-          <main className="mx-auto flex min-h-screen w-full max-w-[430px] flex-col bg-[#fbfdfb] shadow-app md:my-6 md:min-h-[860px] md:rounded-[28px] md:border md:border-white/70">
-            {children}
-          </main>
+          <NotificationsProvider>
+            <main className="mx-auto flex min-h-screen w-full max-w-[430px] flex-col bg-[#fbfdfb] shadow-app md:my-6 md:min-h-[860px] md:rounded-[28px] md:border md:border-white/70">
+              {children}
+            </main>
+          </NotificationsProvider>
         </LanguageProvider>
       </body>
     </html>
