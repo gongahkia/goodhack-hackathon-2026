@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, FileText, Settings } from "lucide-react";
+import { CalendarDays, ClipboardCheck, FileText, Settings } from "lucide-react";
 import { clsx } from "clsx";
 import { useI18n } from "@/lib/i18n";
 
 const items = [
   { href: "/", labelKey: "nav.calendar", icon: CalendarDays },
+  { href: "/review", labelKey: "nav.review", icon: ClipboardCheck },
   { href: "/records", labelKey: "nav.records", icon: FileText },
   { href: "/settings", labelKey: "nav.settings", icon: Settings }
 ];
