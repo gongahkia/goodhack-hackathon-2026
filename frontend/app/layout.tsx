@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { NotificationsProvider } from "@/components/notifications-provider";
 import { LanguageProvider } from "@/lib/i18n";
 import "./globals.css";
 
