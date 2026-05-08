@@ -29,6 +29,7 @@ const dictionaries: Record<Language, Dictionary> = {
     "common.api": "API",
     "common.storage": "Storage",
     "common.apply": "Apply",
+    "common.reschedule": "Reschedule",
     "common.openResource": "Open resource",
     "common.noneYet": "None yet",
     "status.pending_review": "Needs review",
