@@ -451,7 +451,22 @@ const dictionaries: Record<Language, Dictionary> = {
     "settings.traceability": "கண்காணிக்கத்தன்மை",
     "settings.reasoningTrail": "காரண விளக்க தடம்",
     "settings.recordProvenance": "பதிவு மூலத் தடம்",
-    "settings.systemStatus": "கணினி நிலை"
+    "settings.systemStatus": "கணினி நிலை",
+    "notifications.title": "அறிவிப்புகள்",
+    "notifications.subtitle": "பராமரிப்பு திட்ட எச்சரிக்கைகள் மற்றும் அண்மைய முடிவுகள்",
+    "notifications.active": "செயலில்",
+    "notifications.dismissed": "நிராகரிக்கப்பட்டவை",
+    "notifications.emptyActive": "செயலில் உள்ள அறிவிப்புகள் இல்லை.",
+    "notifications.emptyDismissed": "நிராகரிக்கப்பட்ட அறிவிப்புகள் இல்லை.",
+    "notifications.view": "காண்க",
+    "notifications.dismiss": "அறிவிப்பை நிராகரி",
+    "notifications.restore": "மீட்டமை",
+    "notifications.sentAt": "அனுப்பப்பட்டது",
+    "notifications.syncFailed": "அறிவிப்புகள் கிடைக்கவில்லை",
+    "notifications.syncFailedBody": "பராமரிப்பு திட்ட ஓட்டத்தை புதுப்பிக்க முடியவில்லை.",
+    "notifications.statusSaved": "பராமரிப்பு செயல் புதுப்பிக்கப்பட்டது",
+    "notifications.editSaved": "பராமரிப்பு செயல் திருத்தப்பட்டது",
+    "notifications.carePlanRebuilt": "பராமரிப்பு திட்டம் மீண்டும் உருவாக்கப்பட்டது"
   }
 };
 
