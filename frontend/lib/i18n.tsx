@@ -18,6 +18,7 @@ export const languages: Array<{ code: Language; label: string; nativeLabel: stri
 const dictionaries: Record<Language, Dictionary> = {
   en: {
     "nav.calendar": "Calendar",
+    "nav.review": "Review",
     "nav.records": "Records",
     "nav.settings": "Settings",
     "common.loadingCalendar": "Loading calendar...",
