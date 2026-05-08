@@ -6,12 +6,11 @@ import { BottomNav } from "@/components/bottom-nav";
 import { CalendarView } from "@/components/calendar-view";
 import { StatusBadge } from "@/components/status-badge";
 import { api } from "@/lib/api";
-import { formatDate } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import type { KgNode, PatientSummary } from "@/lib/types";
 
 export default function DashboardPage() {
-  const { t, dateLocale } = useI18n();
+  const { t } = useI18n();
   const [patient, setPatient] = useState<PatientSummary | null>(null);
   const [events, setEvents] = useState<KgNode[]>([]);
   const [loading, setLoading] = useState(true);
