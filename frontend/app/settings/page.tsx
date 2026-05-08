@@ -34,10 +34,18 @@ export default function SettingsPage() {
   async function rebuildRecords() {
     setBusy("reset");
     setMessage(null);
-    await api.reset();
-    await load();
-    setMessage(t("settings.rebuilt"));
-    setBusy(null);
+    setError(null);
+    try {
+      await api.reset();
+      await load();
+      await refreshNotifications({ suppressToasts: true });
+      setMessage(t("settings.rebuilt"));
+      notify({ title: t("notifications.carePlanRebuilt"), body: t("settings.rebuilt"), kind: "system", href: "/" });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
   }
 
   return (
