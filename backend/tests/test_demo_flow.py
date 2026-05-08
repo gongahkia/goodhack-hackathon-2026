@@ -67,3 +67,27 @@ async def test_unprovenanced_scheduled_action_is_rejected_by_toolbox():
 
     assert errors
     assert await store.list_nodes(PATIENT_ID, ["scheduled_action"]) == []
+
+
+@pytest.mark.asyncio
+async def test_notifications_include_pending_and_dismissed_care_actions():
+    store = MemoryGraphStore()
+    await store.init()
+    await seed_baseline(store)
+    trigger = await ingest_trigger_records(store)
+    await run_agent_for_trigger(store, Settings(demo_agent_mode="scripted"), PATIENT_ID, trigger["node_ids"][0])
+
+    action = (await store.list_nodes(PATIENT_ID, ["scheduled_action"]))[0]
+    await store.update_node_status(action.id, "dismissed")
+    feedback = await store.create_node(
+        "caregiver_feedback",
+        {"patient_id": PATIENT_ID, "target_node_id": str(action.id), "status": "dismissed"},
+        "user",
+        status="approved",
+    )
+    await store.create_edge(feedback.id, action.id, "feedback_on")
+
+    notifications = build_notifications(await store.graph_subset(PATIENT_ID))
+
+    assert any(item["kind"] == "review" for item in notifications)
+    assert any(item["kind"] == "dismissed" and item["source_node_id"] == str(action.id) for item in notifications)
