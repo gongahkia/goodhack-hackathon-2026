@@ -52,6 +52,12 @@ export default function EventDetailPage({ params }: { params: { id: string } }) 
     setEvent(detail);
     setTitle(detail.payload.title || "");
     setDescription(detail.payload.description || "");
+    setActionType(detail.payload.action_type || "");
+    setStartAt(toDatetimeLocal(detail.payload.start_at));
+    setEndAt(toDatetimeLocal(detail.payload.end_at));
+    setRecurrence(detail.payload.recurrence || "");
+    setLocation(detail.payload.location || "");
+    setAgency(detail.payload.agency || "");
   }
 
   useEffect(() => {
