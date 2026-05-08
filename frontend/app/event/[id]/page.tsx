@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ExternalLink, Save, ThumbsDown, ThumbsUp } from "lucide-react";
+import type { ChangeEvent } from "react";
+import { BookOpen, ExternalLink, FileText, ImageIcon, Info, Paperclip, Save, ThumbsDown, ThumbsUp, Trash2, Upload, X } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { BottomNav } from "@/components/bottom-nav";
+import { useNotifications } from "@/components/notifications-provider";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
