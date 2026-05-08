@@ -17,7 +17,7 @@ export function BottomNav() {
   const pathname = usePathname();
   const { t } = useI18n();
   return (
-    <nav className="sticky bottom-0 grid grid-cols-3 border-t border-[#dde5df] bg-white/95 px-2 py-2 backdrop-blur">
+    <nav className="sticky bottom-0 z-40 grid grid-cols-4 border-t border-[#dde5df] bg-white/95 px-2 py-2 backdrop-blur">
       {items.map((item) => {
         const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href) && item.href !== "#";
         const Icon = item.icon;
