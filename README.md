@@ -74,6 +74,10 @@ The current repository implements the v1 hackathon MVP described in [ROADMAP.md]
 * Caregiver controls
   * Approve, dismiss, and edit pending actions
   * Feedback stored as graph state for future roadmap work
+* Language support
+  * English, Bahasa Melayu, Chinese, and Tamil UI language packs
+  * Persisted language selection in Settings
+  * Static navigation, labels, statuses, and controls translated in the frontend
 * Local-first rehearsal path
   * In-memory store when `DATABASE_URL` is absent
   * Scripted reasoning fallback when `OPENAI_API_KEY` is absent
