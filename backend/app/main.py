@@ -117,6 +117,12 @@ async def event_detail(event_id: UUID) -> dict:
     }
 
 
+@app.get("/notifications")
+async def notifications() -> list[dict]:
+    graph = await store.graph_subset(PATIENT_ID)
+    return build_notifications(graph)
+
+
 @app.patch("/nodes/{node_id}/status")
 async def update_status(node_id: UUID, update: StatusUpdate) -> dict:
     node = await store.update_node_status(node_id, update.status)
