@@ -66,25 +66,114 @@ export default function EventDetailPage({ params }: { params: { id: string } }) 
 
   async function setStatus(status: string) {
     setBusy(status);
-    await api.status(params.id, status);
-    await load();
-    setBusy(null);
+    try {
+      const updated = await api.status(params.id, status);
+      await load();
+      await refreshNotifications({ suppressToasts: true });
+      notify({
+        title: t("notifications.statusSaved"),
+        body: updated.payload.title || event?.payload.title || t("event.careAction"),
+        kind: status,
+        href: `/event/${params.id}`
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function saveEdit() {
     setBusy("edit");
-    await api.editNode(params.id, { title, description });
-    await load();
-    setBusy(null);
+    try {
+      const payload: Record<string, string> = {
+        title,
+        description,
+        action_type: actionType,
+        recurrence,
+        location,
+        agency
+      };
+      if (startAt) {
+        payload.start_at = new Date(startAt).toISOString();
+      }
+      if (endAt) {
+        payload.end_at = new Date(endAt).toISOString();
+      }
+      const updated = await api.editNode(params.id, payload);
+      await load();
+      await refreshNotifications({ suppressToasts: true });
+      notify({
+        title: t("notifications.editSaved"),
+        body: updated.payload.title || title,
+        kind: "edited",
+        href: `/event/${params.id}`
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function attachFiles(changeEvent: ChangeEvent<HTMLInputElement>) {
+    if (!event) {
+      return;
+    }
+    const files = Array.from(changeEvent.target.files || []);
+    if (files.length === 0) {
+      return;
+    }
+    setBusy("attachment");
+    setError(null);
+    try {
+      const newAttachments = await Promise.all(files.map(fileToAttachment));
+      const attachments = [...((event.payload.attachments as EventAttachment[] | undefined) || []), ...newAttachments];
+      const updated = await api.editNode(params.id, { attachments });
+      await load();
+      await refreshNotifications({ suppressToasts: true });
+      notify({
+        title: t("event.attachmentsUpdated"),
+        body: updated.payload.title || title,
+        kind: "edited",
+        href: `/event/${params.id}`
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+      changeEvent.target.value = "";
+    }
+  }
+
+  async function removeAttachment(attachmentId: string) {
+    if (!event) {
+      return;
+    }
+    setBusy("attachment");
+    setError(null);
+    try {
+      const attachments = ((event.payload.attachments as EventAttachment[] | undefined) || []).filter((attachment) => attachment.id !== attachmentId);
+      await api.editNode(params.id, { attachments });
+      await load();
+      await refreshNotifications({ suppressToasts: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
   }
 
   const resource = event?.related_nodes.find((node) => node.type === "recommended_resource");
   const grant = event?.related_nodes.find((node) => node.type === "grant_opportunity");
+  const attachments = ((event?.payload.attachments as EventAttachment[] | undefined) || []) as EventAttachment[];
+  const references = event ? careReferencesForEvent(event, resource) : [];
+  const selectedReference = references.find((reference) => reference.id === activeReference) || references[0] || null;
 
   return (
     <>
       <AppHeader title={t("event.title")} subtitle={t("event.subtitle")} />
-      <section className="flex-1 space-y-4 px-4 pb-4">
+      <section className="flex-1 space-y-4 px-4 pb-28">
         {error ? <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div> : null}
         {!event ? <p className="rounded-lg bg-white p-4 text-sm text-[#66726a]">{t("event.loading")}</p> : null}
         {event ? (
