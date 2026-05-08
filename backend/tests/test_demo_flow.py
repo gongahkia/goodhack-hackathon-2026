@@ -6,6 +6,7 @@ from app.agent.loop import run_agent_for_trigger
 from app.config import Settings
 from app.demo import PATIENT_ID, ingest_trigger_records, seed_baseline
 from app.graph_queries import backtrace_sources, forward_actions
+from app.notifications import build_notifications
 from app.store import MemoryGraphStore
 
 
