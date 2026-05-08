@@ -81,6 +81,7 @@ The North Star metric is **caregiver-hours saved per week** while maintaining or
 - **Live web search (Exa) for educational content and grants** with safety guardrails: source allowlist (gov.sg, healthhub.sg, AIC, recognized clinical bodies), recency checks, and a secondary LLM verification pass before content is shown.
 - **Memory layer**: caregiver Approve/Dismiss/Edit signals now condition future reasoning. If a caregiver consistently dismisses dietary suggestions, the agent down-weights them. Stored as structured preferences + raw event log.
 - **Scheduled re-reasoning**: nightly job re-examines the full record set per patient and surfaces "what's changed, what should I anticipate?" updates, not just record-triggered updates.
+- **Calendar export and subscription integrations**: provide standards-based calendar export (`.ics`) and a stable subscription feed that external calendar apps can consume directly. Caregivers should be able to add the provisioned care schedule to Apple Calendar, Google Calendar, Outlook, and similar apps, with updates flowing from Caregiver Companion into their existing daily calendar workflow.
 - **Admin / clinician review interface**: a separate role can review AI-generated tasks before they reach the caregiver, for high-risk recommendations (e.g., medication-related, mobility/fall-risk, financial applications above a threshold). Reviewer's accept/reject also feeds memory.
 - **Proper evaluation harness**:
   - Golden test set of synthetic patient records with expected schedules.
