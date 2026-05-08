@@ -14,11 +14,36 @@ import { formatDate, recordTitle, shortDate } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import type { EventDetail, KgNode } from "@/lib/types";
 
+type EventAttachment = {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  data_url: string;
+  created_at: string;
+};
+
+type CareReference = {
+  id: string;
+  label: string;
+  definition: string;
+  purpose: string;
+  references: Array<{ title: string; source: string; url: string }>;
+};
+
 export default function EventDetailPage({ params }: { params: { id: string } }) {
   const { t, dateLocale } = useI18n();
+  const { notify, refreshNotifications } = useNotifications();
   const [event, setEvent] = useState<EventDetail | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [actionType, setActionType] = useState("");
+  const [startAt, setStartAt] = useState("");
+  const [endAt, setEndAt] = useState("");
+  const [recurrence, setRecurrence] = useState("");
+  const [location, setLocation] = useState("");
+  const [agency, setAgency] = useState("");
+  const [activeReference, setActiveReference] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
