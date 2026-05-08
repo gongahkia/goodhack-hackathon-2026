@@ -30,20 +30,110 @@ textarea {
   font-size: 0.78rem;
 }
 
+.fc .fc-toolbar {
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
 .fc .fc-toolbar-title {
   font-size: 1rem;
   font-weight: 700;
+  color: #17201c;
 }
 
 .fc .fc-button {
-  background: #405b48;
-  border-color: #405b48;
+  background: #f5f8f6;
+  border-color: #d7dfd9;
   border-radius: 8px;
+  color: #405b48;
   padding: 0.35rem 0.55rem;
   font-size: 0.75rem;
+  font-weight: 700;
+  box-shadow: none;
+}
+
+.fc .fc-button:hover,
+.fc .fc-button:focus {
+  background: #d9f2e2;
+  border-color: #c7d8cc;
+  color: #17201c;
+  box-shadow: none;
+}
+
+.fc .fc-col-header-cell-cushion {
+  color: #66726a;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.fc .fc-daygrid-day-number {
+  color: #536159;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.25rem 0.35rem;
+}
+
+.fc .fc-day-today .fc-daygrid-day-number {
+  align-items: center;
+  background: #2f80ed;
+  border-radius: 999px;
+  color: white;
+  display: inline-flex;
+  height: 1.6rem;
+  justify-content: center;
+  margin: 0.1rem;
+  min-width: 1.6rem;
 }
 
 .fc .fc-daygrid-event {
   border-radius: 6px;
-  padding: 1px 3px;
+  margin-inline: 2px;
+  padding: 0;
+}
+
+.fc .fc-daygrid-day-frame {
+  min-height: 4.8rem;
+}
+
+.fc .fc-timegrid-event {
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.fc .fc-more-link {
+  color: #405b48;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+@media print {
+  :root,
+  body {
+    background: white !important;
+  }
+
+  main {
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    max-width: none !important;
+    min-height: auto !important;
+  }
+
+  nav,
+  .no-print {
+    display: none !important;
+  }
+
+  .schedule-calendar-scroll {
+    overflow: visible !important;
+  }
+
+  .fc,
+  section,
+  article {
+    break-inside: avoid;
+  }
 }
