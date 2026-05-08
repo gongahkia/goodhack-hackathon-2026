@@ -1,0 +1,74 @@
+[
+  {
+    "id": "aic_seniors_mobility_enabling_fund",
+    "name": "Seniors' Mobility and Enabling Fund",
+    "agency": "Agency for Integrated Care",
+    "url": "https://www.aic.sg/financial-assistance/seniors-mobility-enabling-fund-smf/",
+    "applicable_conditions": ["parkinson", "stroke", "mobility", "falls", "assistive device"],
+    "eligibility_hints": ["Singapore Citizen", "age 60 and above", "mobility aid", "home healthcare items"],
+    "summary": "Subsidies for mobility and assistive devices, transport, and home healthcare items for eligible seniors."
+  },
+  {
+    "id": "pioneer_generation_package",
+    "name": "Pioneer Generation Package",
+    "agency": "Ministry of Health",
+    "url": "https://www.moh.gov.sg/cost-financing/healthcare-schemes-subsidies/pioneer-generation-package",
+    "applicable_conditions": ["chronic disease", "senior", "medication"],
+    "eligibility_hints": ["Pioneer Generation", "Singapore Citizen"],
+    "summary": "Healthcare subsidies and MediSave top-ups for eligible Pioneer Generation seniors."
+  },
+  {
+    "id": "merdeka_generation_package",
+    "name": "Merdeka Generation Package",
+    "agency": "Ministry of Health",
+    "url": "https://www.moh.gov.sg/cost-financing/healthcare-schemes-subsidies/merdeka-generation-package",
+    "applicable_conditions": ["chronic disease", "senior", "medication"],
+    "eligibility_hints": ["Merdeka Generation", "Singapore Citizen"],
+    "summary": "Outpatient care subsidies, MediSave top-ups, and related support for eligible Merdeka Generation seniors."
+  },
+  {
+    "id": "medisave_chronic_disease_management",
+    "name": "MediSave for Chronic Disease Management Programme",
+    "agency": "Ministry of Health",
+    "url": "https://www.moh.gov.sg/cost-financing/healthcare-schemes-subsidies/medisave",
+    "applicable_conditions": ["hypertension", "diabetes", "copd", "chronic disease"],
+    "eligibility_hints": ["approved chronic conditions", "outpatient treatment"],
+    "summary": "Allows MediSave use for selected outpatient chronic disease treatments."
+  },
+  {
+    "id": "chas",
+    "name": "Community Health Assist Scheme",
+    "agency": "Ministry of Health",
+    "url": "https://www.chas.sg/",
+    "applicable_conditions": ["chronic disease", "hypertension", "copd", "dementia"],
+    "eligibility_hints": ["Singapore Citizen", "CHAS card", "participating GP or dental clinic"],
+    "summary": "Subsidies for medical and dental care at participating clinics."
+  },
+  {
+    "id": "home_caregiving_grant",
+    "name": "Home Caregiving Grant",
+    "agency": "Agency for Integrated Care",
+    "url": "https://www.aic.sg/financial-assistance/home-caregiving-grant/",
+    "applicable_conditions": ["dementia", "stroke", "functional limitation", "caregiving"],
+    "eligibility_hints": ["permanent moderate disability", "means-tested", "Singapore Citizen or PR"],
+    "summary": "Monthly cash payout to support caregiving expenses for eligible persons with permanent moderate disability."
+  },
+  {
+    "id": "careshield_life_eldershield",
+    "name": "CareShield Life / ElderShield",
+    "agency": "Agency for Integrated Care",
+    "url": "https://www.aic.sg/financial-assistance/careshield-life-eldershield/",
+    "applicable_conditions": ["severe disability", "stroke", "dementia", "parkinson"],
+    "eligibility_hints": ["unable to perform activities of daily living", "scheme membership"],
+    "summary": "Long-term care insurance payouts for eligible people with severe disability."
+  },
+  {
+    "id": "sg_enable_assistive_technology_fund",
+    "name": "Assistive Technology Fund",
+    "agency": "SG Enable",
+    "url": "https://www.sgenable.sg/your-first-stop/disability-support/assistive-technology/assistive-technology-fund",
+    "applicable_conditions": ["assistive technology", "mobility", "disability"],
+    "eligibility_hints": ["person with disability", "means-tested", "assistive technology device"],
+    "summary": "Subsidies for assistive technology devices for eligible persons with disabilities."
+  }
+]
