@@ -200,6 +200,7 @@ async def run_scripted_demo_reasoner(store: GraphStore, toolbox: AgentToolbox, p
             "start_at": follow_up_at,
             "end_at": (datetime.fromisoformat(follow_up_at) + timedelta(hours=1)).isoformat(),
             "location": "Tan Tock Seng Hospital Neurology",
+            "scheduling_url": "https://www.ttsh.com.sg/Patients-and-Visitors/Your-Clinic-Visit/Pages/Appointments.aspx",
         },
     )
     await store.create_edge(condition.id, follow_up.id, "triggers")
