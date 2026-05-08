@@ -23,6 +23,7 @@ export const api = {
   reset: () => request<Record<string, any>>("/demo/reset", { method: "POST" }),
   events: () => request<KgNode[]>("/events"),
   event: (id: string) => request<EventDetail>(`/events/${id}`),
+  notifications: () => request<AppNotification[]>("/notifications"),
   records: () => request<Array<KgNode & { forward_actions: KgNode[] }>>("/records"),
   audit: () => request<ReasoningLog[]>("/audit"),
   auditLog: (id: string) => request<ReasoningLog>(`/audit/${id}`),
