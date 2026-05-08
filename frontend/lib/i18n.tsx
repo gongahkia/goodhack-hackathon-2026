@@ -1,0 +1,331 @@
+"use client";
+
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
+
+export type Language = "en" | "ms" | "zh" | "ta";
+
+type Dictionary = Record<string, string>;
+
+const STORAGE_KEY = "caregiver-companion-language";
+
+export const languages: Array<{ code: Language; label: string; nativeLabel: string; htmlLang: string; dateLocale: string }> = [
+  { code: "en", label: "English", nativeLabel: "English", htmlLang: "en", dateLocale: "en-SG" },
+  { code: "ms", label: "Bahasa Melayu", nativeLabel: "Bahasa Melayu", htmlLang: "ms", dateLocale: "ms-SG" },
+  { code: "zh", label: "Chinese", nativeLabel: "中文", htmlLang: "zh-Hans", dateLocale: "zh-SG" },
+  { code: "ta", label: "Tamil", nativeLabel: "தமிழ்", htmlLang: "ta", dateLocale: "ta-SG" }
+];
+
+const dictionaries: Record<Language, Dictionary> = {
+  en: {
+    "nav.calendar": "Calendar",
+    "nav.records": "Records",
+    "nav.settings": "Settings",
+    "common.loadingCalendar": "Loading calendar...",
+    "common.patient": "Patient",
+    "common.yearsOld": "yo",
+    "common.checking": "Checking",
+    "common.connected": "Connected",
+    "common.api": "API",
+    "common.storage": "Storage",
+    "common.apply": "Apply",
+    "common.openResource": "Open resource",
+    "common.noneYet": "None yet",
+    "status.pending_review": "Needs review",
+    "status.approved": "Approved",
+    "status.dismissed": "Dismissed",
+    "status.edited": "Edited",
+    "calendar.title": "Mdm Tan's Care Plan",
+    "calendar.subtitle": "Traceable actions from connected health records",
+    "calendar.needsReview": "Needs review",
+    "calendar.month": "month",
+    "calendar.week": "week",
+    "calendar.day": "day",
+    "records.title": "NEHR Records",
+    "records.subtitle": "Forward trace from source records to care actions",
+    "records.empty": "No records yet. Records are processed automatically when connected.",
+    "records.fallback": "Health record source entry.",
+    "records.spawnedActions": "Spawned actions",
+    "audit.title": "Reasoning Trail",
+    "audit.subtitle": "Evidence, tool calls, and conclusions",
+    "audit.empty": "No reasoning logs yet. Records are processed automatically when connected.",
+    "audit.conclusion": "Conclusion",
+    "event.title": "Action Detail",
+    "event.subtitle": "Evidence, resources, and review controls",
+    "event.loading": "Loading event...",
+    "event.careAction": "care action",
+    "event.review": "Review",
+    "event.approve": "Approve",
+    "event.dismiss": "Dismiss",
+    "event.saveEdit": "Save edit",
+    "event.actionTitle": "Action title",
+    "event.actionDescription": "Action description",
+    "event.derivedFrom": "Derived from",
+    "event.resource": "Recommended resource",
+    "event.grant": "Grant match",
+    "event.reasoning": "Reasoning",
+    "event.viewReasoning": "View reasoning trail",
+    "settings.title": "Settings",
+    "settings.subtitle": "Care plan controls and data visibility",
+    "settings.language": "Language",
+    "settings.languageDescription": "Choose the app language for navigation, labels, and controls.",
+    "settings.careProfile": "Care profile",
+    "settings.caregiver": "Caregiver",
+    "settings.livingArrangement": "Living arrangement",
+    "settings.recordProcessing": "Record processing",
+    "settings.recordProcessingDescription": "Connected health records are processed automatically by the care plan engine.",
+    "settings.rebuild": "Rebuild care plan",
+    "settings.rebuilding": "Rebuilding records...",
+    "settings.rebuilt": "Care plan was rebuilt from connected records.",
+    "settings.traceability": "Traceability",
+    "settings.reasoningTrail": "Reasoning trail",
+    "settings.recordProvenance": "Record provenance",
+    "settings.systemStatus": "System status"
+  },
+  ms: {
+    "nav.calendar": "Kalendar",
+    "nav.records": "Rekod",
+    "nav.settings": "Tetapan",
+    "common.loadingCalendar": "Memuatkan kalendar...",
+    "common.patient": "Pesakit",
+    "common.yearsOld": "tahun",
+    "common.checking": "Memeriksa",
+    "common.connected": "Bersambung",
+    "common.api": "API",
+    "common.storage": "Storan",
+    "common.apply": "Mohon",
+    "common.openResource": "Buka sumber",
+    "common.noneYet": "Belum ada",
+    "status.pending_review": "Perlu disemak",
+    "status.approved": "Diluluskan",
+    "status.dismissed": "Ditolak",
+    "status.edited": "Disunting",
+    "calendar.title": "Pelan Penjagaan Mdm Tan",
+    "calendar.subtitle": "Tindakan yang boleh dijejaki daripada rekod kesihatan bersambung",
+    "calendar.needsReview": "Perlu disemak",
+    "calendar.month": "bulan",
+    "calendar.week": "minggu",
+    "calendar.day": "hari",
+    "records.title": "Rekod NEHR",
+    "records.subtitle": "Jejak ke hadapan daripada rekod sumber kepada tindakan penjagaan",
+    "records.empty": "Tiada rekod lagi. Rekod diproses secara automatik apabila disambungkan.",
+    "records.fallback": "Entri sumber rekod kesihatan.",
+    "records.spawnedActions": "Tindakan terhasil",
+    "audit.title": "Jejak Penaakulan",
+    "audit.subtitle": "Bukti, panggilan alat, dan kesimpulan",
+    "audit.empty": "Tiada log penaakulan lagi. Rekod diproses secara automatik apabila disambungkan.",
+    "audit.conclusion": "Kesimpulan",
+    "event.title": "Butiran Tindakan",
+    "event.subtitle": "Bukti, sumber, dan kawalan semakan",
+    "event.loading": "Memuatkan tindakan...",
+    "event.careAction": "tindakan penjagaan",
+    "event.review": "Semakan",
+    "event.approve": "Luluskan",
+    "event.dismiss": "Tolak",
+    "event.saveEdit": "Simpan suntingan",
+    "event.actionTitle": "Tajuk tindakan",
+    "event.actionDescription": "Penerangan tindakan",
+    "event.derivedFrom": "Dihasilkan daripada",
+    "event.resource": "Sumber disyorkan",
+    "event.grant": "Padanan geran",
+    "event.reasoning": "Penaakulan",
+    "event.viewReasoning": "Lihat jejak penaakulan",
+    "settings.title": "Tetapan",
+    "settings.subtitle": "Kawalan pelan penjagaan dan keterlihatan data",
+    "settings.language": "Bahasa",
+    "settings.languageDescription": "Pilih bahasa aplikasi untuk navigasi, label, dan kawalan.",
+    "settings.careProfile": "Profil penjagaan",
+    "settings.caregiver": "Penjaga",
+    "settings.livingArrangement": "Susunan tempat tinggal",
+    "settings.recordProcessing": "Pemprosesan rekod",
+    "settings.recordProcessingDescription": "Rekod kesihatan bersambung diproses secara automatik oleh enjin pelan penjagaan.",
+    "settings.rebuild": "Bina semula pelan penjagaan",
+    "settings.rebuilding": "Membina semula rekod...",
+    "settings.rebuilt": "Pelan penjagaan telah dibina semula daripada rekod bersambung.",
+    "settings.traceability": "Kebolehjejakan",
+    "settings.reasoningTrail": "Jejak penaakulan",
+    "settings.recordProvenance": "Asal usul rekod",
+    "settings.systemStatus": "Status sistem"
+  },
+  zh: {
+    "nav.calendar": "日历",
+    "nav.records": "记录",
+    "nav.settings": "设置",
+    "common.loadingCalendar": "正在加载日历...",
+    "common.patient": "患者",
+    "common.yearsOld": "岁",
+    "common.checking": "检查中",
+    "common.connected": "已连接",
+    "common.api": "API",
+    "common.storage": "存储",
+    "common.apply": "申请",
+    "common.openResource": "打开资源",
+    "common.noneYet": "暂无",
+    "status.pending_review": "需要审核",
+    "status.approved": "已批准",
+    "status.dismissed": "已忽略",
+    "status.edited": "已编辑",
+    "calendar.title": "陈女士的护理计划",
+    "calendar.subtitle": "来自已连接健康记录的可追溯行动",
+    "calendar.needsReview": "需要审核",
+    "calendar.month": "月",
+    "calendar.week": "周",
+    "calendar.day": "日",
+    "records.title": "NEHR 记录",
+    "records.subtitle": "从来源记录追踪到护理行动",
+    "records.empty": "暂无记录。连接后会自动处理记录。",
+    "records.fallback": "健康记录来源条目。",
+    "records.spawnedActions": "生成的行动",
+    "audit.title": "推理记录",
+    "audit.subtitle": "证据、工具调用和结论",
+    "audit.empty": "暂无推理日志。连接后会自动处理记录。",
+    "audit.conclusion": "结论",
+    "event.title": "行动详情",
+    "event.subtitle": "证据、资源和审核控制",
+    "event.loading": "正在加载行动...",
+    "event.careAction": "护理行动",
+    "event.review": "审核",
+    "event.approve": "批准",
+    "event.dismiss": "忽略",
+    "event.saveEdit": "保存编辑",
+    "event.actionTitle": "行动标题",
+    "event.actionDescription": "行动说明",
+    "event.derivedFrom": "来源于",
+    "event.resource": "推荐资源",
+    "event.grant": "匹配补助",
+    "event.reasoning": "推理",
+    "event.viewReasoning": "查看推理记录",
+    "settings.title": "设置",
+    "settings.subtitle": "护理计划控制和数据可见性",
+    "settings.language": "语言",
+    "settings.languageDescription": "选择应用导航、标签和控制项的语言。",
+    "settings.careProfile": "护理档案",
+    "settings.caregiver": "照护者",
+    "settings.livingArrangement": "居住安排",
+    "settings.recordProcessing": "记录处理",
+    "settings.recordProcessingDescription": "已连接的健康记录会由护理计划引擎自动处理。",
+    "settings.rebuild": "重建护理计划",
+    "settings.rebuilding": "正在重建记录...",
+    "settings.rebuilt": "护理计划已根据已连接记录重建。",
+    "settings.traceability": "可追溯性",
+    "settings.reasoningTrail": "推理记录",
+    "settings.recordProvenance": "记录来源",
+    "settings.systemStatus": "系统状态"
+  },
+  ta: {
+    "nav.calendar": "நாட்காட்டி",
+    "nav.records": "பதிவுகள்",
+    "nav.settings": "அமைப்புகள்",
+    "common.loadingCalendar": "நாட்காட்டி ஏற்றப்படுகிறது...",
+    "common.patient": "நோயாளர்",
+    "common.yearsOld": "வயது",
+    "common.checking": "சரிபார்க்கிறது",
+    "common.connected": "இணைக்கப்பட்டது",
+    "common.api": "API",
+    "common.storage": "சேமிப்பு",
+    "common.apply": "விண்ணப்பிக்க",
+    "common.openResource": "வளத்தைத் திறக்க",
+    "common.noneYet": "இன்னும் இல்லை",
+    "status.pending_review": "மதிப்பாய்வு தேவை",
+    "status.approved": "அங்கீகரிக்கப்பட்டது",
+    "status.dismissed": "நிராகரிக்கப்பட்டது",
+    "status.edited": "திருத்தப்பட்டது",
+    "calendar.title": "மடம் டானின் பராமரிப்பு திட்டம்",
+    "calendar.subtitle": "இணைக்கப்பட்ட சுகாதார பதிவுகளிலிருந்து கண்காணிக்கக்கூடிய செயல்கள்",
+    "calendar.needsReview": "மதிப்பாய்வு தேவை",
+    "calendar.month": "மாதம்",
+    "calendar.week": "வாரம்",
+    "calendar.day": "நாள்",
+    "records.title": "NEHR பதிவுகள்",
+    "records.subtitle": "மூல பதிவுகளிலிருந்து பராமரிப்பு செயல்களுக்கு முன்னோக்கு தடம்",
+    "records.empty": "இன்னும் பதிவுகள் இல்லை. இணைக்கப்பட்டதும் பதிவுகள் தானாக செயலாக்கப்படும்.",
+    "records.fallback": "சுகாதார பதிவு மூல உள்ளீடு.",
+    "records.spawnedActions": "உருவான செயல்கள்",
+    "audit.title": "காரண விளக்க தடம்",
+    "audit.subtitle": "ஆதாரம், கருவி அழைப்புகள், மற்றும் முடிவுகள்",
+    "audit.empty": "இன்னும் காரண விளக்க பதிவுகள் இல்லை. இணைக்கப்பட்டதும் பதிவுகள் தானாக செயலாக்கப்படும்.",
+    "audit.conclusion": "முடிவு",
+    "event.title": "செயல் விவரம்",
+    "event.subtitle": "ஆதாரம், வளங்கள், மற்றும் மதிப்பாய்வு கட்டுப்பாடுகள்",
+    "event.loading": "செயல் ஏற்றப்படுகிறது...",
+    "event.careAction": "பராமரிப்பு செயல்",
+    "event.review": "மதிப்பாய்வு",
+    "event.approve": "அங்கீகரி",
+    "event.dismiss": "நிராகரி",
+    "event.saveEdit": "திருத்தத்தை சேமி",
+    "event.actionTitle": "செயல் தலைப்பு",
+    "event.actionDescription": "செயல் விளக்கம்",
+    "event.derivedFrom": "இதிலிருந்து பெறப்பட்டது",
+    "event.resource": "பரிந்துரைக்கப்பட்ட வளம்",
+    "event.grant": "மானிய பொருத்தம்",
+    "event.reasoning": "காரண விளக்கம்",
+    "event.viewReasoning": "காரண விளக்க தடத்தை காண்க",
+    "settings.title": "அமைப்புகள்",
+    "settings.subtitle": "பராமரிப்பு திட்ட கட்டுப்பாடுகள் மற்றும் தரவு தெரிவுத்தன்மை",
+    "settings.language": "மொழி",
+    "settings.languageDescription": "வழிசெலுத்தல், லேபிள்கள், மற்றும் கட்டுப்பாடுகளுக்கான பயன்பாட்டு மொழியைத் தேர்ந்தெடுக்கவும்.",
+    "settings.careProfile": "பராமரிப்பு சுயவிவரம்",
+    "settings.caregiver": "பராமரிப்பாளர்",
+    "settings.livingArrangement": "வசிப்பு ஏற்பாடு",
+    "settings.recordProcessing": "பதிவு செயலாக்கம்",
+    "settings.recordProcessingDescription": "இணைக்கப்பட்ட சுகாதார பதிவுகள் பராமரிப்பு திட்ட இயந்திரத்தால் தானாக செயலாக்கப்படும்.",
+    "settings.rebuild": "பராமரிப்பு திட்டத்தை மீண்டும் உருவாக்கு",
+    "settings.rebuilding": "பதிவுகள் மீண்டும் உருவாக்கப்படுகின்றன...",
+    "settings.rebuilt": "இணைக்கப்பட்ட பதிவுகளிலிருந்து பராமரிப்பு திட்டம் மீண்டும் உருவாக்கப்பட்டது.",
+    "settings.traceability": "கண்காணிக்கத்தன்மை",
+    "settings.reasoningTrail": "காரண விளக்க தடம்",
+    "settings.recordProvenance": "பதிவு மூலத் தடம்",
+    "settings.systemStatus": "கணினி நிலை"
+  }
+};
+
+type I18nContextValue = {
+  language: Language;
+  setLanguage: (language: Language) => void;
+  t: (key: string) => string;
+  dateLocale: string;
+};
+
+const I18nContext = createContext<I18nContextValue | null>(null);
+
+function isLanguage(value: string | null): value is Language {
+  return value === "en" || value === "ms" || value === "zh" || value === "ta";
+}
+
+export function LanguageProvider({ children }: { children: React.ReactNode }) {
+  const [language, setLanguageState] = useState<Language>("en");
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    if (isLanguage(stored)) {
+      setLanguageState(stored);
+      document.documentElement.lang = languages.find((item) => item.code === stored)?.htmlLang || "en";
+    }
+  }, []);
+
+  function setLanguage(nextLanguage: Language) {
+    setLanguageState(nextLanguage);
+    window.localStorage.setItem(STORAGE_KEY, nextLanguage);
+    document.documentElement.lang = languages.find((item) => item.code === nextLanguage)?.htmlLang || "en";
+  }
+
+  const value = useMemo<I18nContextValue>(() => {
+    const dictionary = dictionaries[language];
+    const current = languages.find((item) => item.code === language) || languages[0];
+    return {
+      language,
+      setLanguage,
+      dateLocale: current.dateLocale,
+      t: (key: string) => dictionary[key] || dictionaries.en[key] || key
+    };
+  }, [language]);
+
+  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+}
+
+export function useI18n() {
+  const context = useContext(I18nContext);
+  if (!context) {
+    throw new Error("useI18n must be used inside LanguageProvider");
+  }
+  return context;
+}
