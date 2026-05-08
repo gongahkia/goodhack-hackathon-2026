@@ -368,6 +368,7 @@ const dictionaries: Record<Language, Dictionary> = {
     "common.api": "API",
     "common.storage": "சேமிப்பு",
     "common.apply": "விண்ணப்பிக்க",
+    "common.reschedule": "மறுஅட்டவணை",
     "common.openResource": "வளத்தைத் திறக்க",
     "common.noneYet": "இன்னும் இல்லை",
     "status.pending_review": "மதிப்பாய்வு தேவை",
