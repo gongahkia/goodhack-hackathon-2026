@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Activity, Database, FileClock, RefreshCw, RotateCcw, ShieldCheck, UserRound } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { BottomNav } from "@/components/bottom-nav";
+import { useNotifications } from "@/components/notifications-provider";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { languages, useI18n, type Language } from "@/lib/i18n";
