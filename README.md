@@ -167,3 +167,93 @@ TINYFISH_API_KEY=
 CORS_ORIGINS=http://localhost:3000
 DEMO_AGENT_MODE=auto
 ```
+
+Frontend variables live in [`frontend/.env.example`](frontend/.env.example):
+
+```bash
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+```
+
+Without `DATABASE_URL`, the backend uses an in-memory graph store. Without `OPENAI_API_KEY`, the backend uses the scripted v1 reasoning path so the local care flow remains testable.
+
+### Deployment
+
+Recommended deployment split:
+
+* Frontend: Vercel
+* Backend: Render or Railway
+* Database: Supabase Postgres
+
+Backend deployment needs:
+
+```bash
+DATABASE_URL=...
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-5.5
+CORS_ORIGINS=https://your-frontend.example
+```
+
+Frontend deployment needs:
+
+```bash
+NEXT_PUBLIC_API_BASE_URL=https://your-backend.example
+```
+
+## 🛠️ Development Guide
+
+Common commands:
+
+```bash
+make test
+make build
+make clean
+```
+
+Backend tests cover:
+
+* v1 care plan generation
+* scheduled-action provenance enforcement
+* bidirectional trace helpers
+
+Frontend build checks:
+
+* TypeScript validity
+* Next.js production build
+* route generation for Calendar, Records, Settings, Reasoning Trail, and Event Detail
+
+## ❓ FAQ
+
+### How does Caregiver Companion store data?
+
+The deployed store is Supabase Postgres using the schema in [`backend/sql/schema.sql`](backend/sql/schema.sql). Knowledge graph state is stored in:
+
+* `nodes`
+* `edges`
+* `reasoning_logs`
+* `nehr_records_raw`
+
+For local development without `DATABASE_URL`, the backend uses an in-memory store.
+
+### Does the app require an OpenAI API key?
+
+No for local rehearsal, yes for the real agent path.
+
+If `OPENAI_API_KEY` is absent, the backend uses a deterministic scripted reasoner that creates the same v1 care plan. If `OPENAI_API_KEY` is set, the backend uses the OpenAI Responses API function-tool loop.
+
+### Are records manually ingested by the user?
+
+No. The UI does not expose manual ingestion. On backend startup, if the graph is empty, the app prepares the current care plan automatically. Settings includes a rebuild control for local testing and recovery.
+
+### How is provenance enforced?
+
+The agent toolbox stages `scheduled_action` creation until a valid `derived_from` edge is created. The Postgres schema also includes a deferred constraint trigger that rejects persisted scheduled actions without a `derived_from` edge to a `nehr_record` or `inferred_condition`.
+
+### Is this production-ready for real patient data?
+
+No. v1 uses synthetic NEHR-style records and has no authentication. Before real patient data, the roadmap calls for authentication, PDPA review, clinician review workflows, stronger evaluation, and real integration agreements.
+
+## 🙏 Acknowledgement
+
+Built for the Build for Good hackathon in Singapore.
+
+This project uses Next.js, FastAPI, Supabase Postgres, FullCalendar, Tailwind CSS, OpenAI APIs, and curated Singapore healthcare references.
