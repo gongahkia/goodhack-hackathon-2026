@@ -142,6 +142,7 @@ const dictionaries: Record<Language, Dictionary> = {
     "common.api": "API",
     "common.storage": "Storan",
     "common.apply": "Mohon",
+    "common.reschedule": "Jadual semula",
     "common.openResource": "Buka sumber",
     "common.noneYet": "Belum ada",
     "status.pending_review": "Perlu disemak",
