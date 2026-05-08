@@ -60,21 +60,6 @@ export default function DashboardPage() {
         <div className="rounded-xl border border-[#dfe8e2] bg-white p-3">
           {loading ? <p className="p-6 text-center text-sm text-[#66726a]">{t("common.loadingCalendar")}</p> : <CalendarView events={events} />}
         </div>
-
-        <div className="space-y-2">
-          <h3 className="px-1 text-sm font-bold text-[#536159]">{t("calendar.needsReview")}</h3>
-          {events.slice(0, 3).map((event) => (
-            <a href={`/event/${event.id}`} className="block rounded-lg border border-[#dfe8e2] bg-white p-3" key={event.id}>
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="font-semibold">{event.payload.title}</p>
-                  <p className="mt-1 text-xs text-[#66726a]">{formatDate(event.payload.start_at, dateLocale)}</p>
-                </div>
-                <StatusBadge status={event.status} />
-              </div>
-            </a>
-          ))}
-        </div>
       </section>
       <BottomNav />
     </>
