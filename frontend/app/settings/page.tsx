@@ -13,6 +13,7 @@ import type { PatientSummary } from "@/lib/types";
 
 export default function SettingsPage() {
   const { language, setLanguage, t } = useI18n();
+  const { notify, refreshNotifications } = useNotifications();
   const [patient, setPatient] = useState<PatientSummary | null>(null);
   const [health, setHealth] = useState<{ ok: boolean; store: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
