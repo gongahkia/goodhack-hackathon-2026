@@ -34,7 +34,7 @@ export default function DashboardPage() {
   return (
     <>
       <AppHeader title={t("calendar.title")} subtitle={t("calendar.subtitle")} />
-      <section className="flex-1 space-y-4 px-4 pb-4">
+      <section className="flex-1 space-y-4 px-4 pb-28">
         {error ? <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div> : null}
         <div className="rounded-xl border border-[#dfe8e2] bg-white p-4">
           <div className="flex items-start justify-between gap-3">
