@@ -1,0 +1,148 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowRight, ExternalLink, ThumbsDown, ThumbsUp } from "lucide-react";
+import { AppHeader } from "@/components/app-header";
+import { BottomNav } from "@/components/bottom-nav";
+import { useNotifications } from "@/components/notifications-provider";
+import { StatusBadge } from "@/components/status-badge";
+import { Button } from "@/components/ui/button";
+import { api } from "@/lib/api";
+import { formatDate } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
+import type { EventDetail, KgNode } from "@/lib/types";
+
+type ReviewEvent = KgNode | EventDetail;
+
+export default function ReviewPage() {
+  const { t, dateLocale } = useI18n();
+  const { notify, refreshNotifications } = useNotifications();
+  const [events, setEvents] = useState<ReviewEvent[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function load() {
+    setError(null);
+    const scheduled = await api.events();
+    const enriched = await Promise.all(
+      scheduled.map(async (event) => {
+        if (event.payload.action_type !== "grant" && !String(event.payload.title || "").toLowerCase().includes("apply")) {
+          return event;
+        }
+        return api.event(event.id).catch(() => event);
+      })
+    );
+    setEvents(enriched);
+  }
+
+  useEffect(() => {
+    load().catch((err) => setError(err.message));
+  }, []);
+
+  const pendingEvents = useMemo(
+    () =>
+      events
+        .filter((event) => event.status === "pending_review")
+        .sort((a, b) => new Date(a.payload.start_at).getTime() - new Date(b.payload.start_at).getTime()),
+    [events]
+  );
+
+  async function setStatus(event: KgNode, status: "approved" | "dismissed") {
+    setBusy(`${event.id}:${status}`);
+    setError(null);
+    try {
+      const updated = await api.status(event.id, status);
+      await load();
+      await refreshNotifications({ suppressToasts: true });
+      notify({
+        title: t("notifications.statusSaved"),
+        body: updated.payload.title || event.payload.title,
+        kind: status,
+        href: `/event/${event.id}`
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <>
+      <AppHeader title={t("review.title")} subtitle={t("review.subtitle")} />
+      <section className="flex-1 space-y-3 px-4 pb-28">
+        {error ? <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div> : null}
+        {pendingEvents.length === 0 ? <p className="rounded-lg bg-white p-4 text-sm text-[#66726a]">{t("review.empty")}</p> : null}
+        {pendingEvents.map((event) => (
+          <article className="rounded-xl border border-[#dfe8e2] bg-white p-4" key={event.id}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase text-moss">{event.payload.action_type || t("event.careAction")}</p>
+                <h2 className="mt-1 text-lg font-bold text-ink">{event.payload.title}</h2>
+                <p className="mt-1 text-sm text-[#66726a]">{formatDate(event.payload.start_at, dateLocale)}</p>
+              </div>
+              <StatusBadge status={event.status} />
+            </div>
+            <p className="mt-3 text-sm text-[#34423a]">{event.payload.description}</p>
+            {grantApplyUrl(event) ? (
+              <a
+                className="mt-4 inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-moss px-3 py-2 text-sm font-semibold text-white"
+                href={grantApplyUrl(event)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {t("common.apply")} <ExternalLink className="h-4 w-4" />
+              </a>
+            ) : null}
+            {appointmentRescheduleUrl(event) ? (
+              <a
+                className="mt-4 inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-moss px-3 py-2 text-sm font-semibold text-white"
+                href={appointmentRescheduleUrl(event)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {t("common.reschedule")} <ExternalLink className="h-4 w-4" />
+              </a>
+            ) : null}
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Button onClick={() => setStatus(event, "approved")} disabled={Boolean(busy)}>
+                <ThumbsUp className="h-4 w-4" /> {t("event.approve")}
+              </Button>
+              <Button variant="danger" onClick={() => setStatus(event, "dismissed")} disabled={Boolean(busy)}>
+                <ThumbsDown className="h-4 w-4" /> {t("event.dismiss")}
+              </Button>
+            </div>
+            <Link href={`/event/${event.id}`} className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-moss">
+              {t("review.openDetail")} <ArrowRight className="h-4 w-4" />
+            </Link>
+          </article>
+        ))}
+      </section>
+      <BottomNav />
+    </>
+  );
+}
+
+function grantApplyUrl(event: ReviewEvent) {
+  if (!("related_nodes" in event)) {
+    return event.payload.url || event.payload.apply_url || null;
+  }
+  const grant = event.related_nodes.find((node) => node.type === "grant_opportunity");
+  return grant?.payload.url || event.payload.url || event.payload.apply_url || null;
+}
+
+function appointmentRescheduleUrl(event: ReviewEvent) {
+  if (event.payload.action_type !== "appointment") {
+    return null;
+  }
+  return event.payload.scheduling_url || event.payload.reschedule_url || inferSchedulingUrl(event.payload.location || event.payload.title);
+}
+
+function inferSchedulingUrl(value?: string) {
+  const text = String(value || "").toLowerCase();
+  if (text.includes("tan tock seng") || text.includes("ttsh") || text.includes("neurology")) {
+    return "https://www.ttsh.com.sg/Patients-and-Visitors/Your-Clinic-Visit/Pages/Appointments.aspx";
+  }
+  return "https://www.healthhub.sg/programmes/healthhub-health-appointment-system";
+}
