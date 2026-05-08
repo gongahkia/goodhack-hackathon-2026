@@ -1,0 +1,126 @@
+[
+  {
+    "id": "parkinsons_physio_seated_exercises",
+    "type": "video",
+    "condition": "parkinsons",
+    "topic": "physio seated exercises mobility",
+    "title": "Seated Parkinson's Exercise Routine",
+    "source": "Parkinson's Foundation",
+    "youtube_id": "N7eQGdK6m5I",
+    "url": "https://www.youtube.com/embed/N7eQGdK6m5I",
+    "tags": ["exercise", "mobility", "seated", "daily routine"]
+  },
+  {
+    "id": "parkinsons_medication_timing",
+    "type": "article",
+    "condition": "parkinsons",
+    "topic": "medication adherence levodopa timing",
+    "title": "Medication Timing and Parkinson's Symptoms",
+    "source": "HealthHub",
+    "url": "https://www.healthhub.sg/",
+    "tags": ["levodopa", "adherence", "caregiver"]
+  },
+  {
+    "id": "falls_home_safety",
+    "type": "article",
+    "condition": "mobility",
+    "topic": "fall prevention home safety",
+    "title": "Making the Home Safer for Seniors",
+    "source": "HealthHub",
+    "url": "https://www.healthhub.sg/",
+    "tags": ["falls", "home safety", "mobility"]
+  },
+  {
+    "id": "dementia_caregiver_basics",
+    "type": "video",
+    "condition": "dementia",
+    "topic": "caregiver education dementia",
+    "title": "Understanding Dementia for Caregivers",
+    "source": "Dementia Singapore",
+    "youtube_id": "gJk0tqQyKqA",
+    "url": "https://www.youtube.com/embed/gJk0tqQyKqA",
+    "tags": ["dementia", "caregiver", "communication"]
+  },
+  {
+    "id": "dementia_home_routine",
+    "type": "article",
+    "condition": "dementia",
+    "topic": "home routine dementia",
+    "title": "Creating a Daily Routine for Dementia Care",
+    "source": "AIC",
+    "url": "https://www.aic.sg/",
+    "tags": ["routine", "memory", "home care"]
+  },
+  {
+    "id": "post_stroke_rehab",
+    "type": "video",
+    "condition": "stroke",
+    "topic": "post stroke rehabilitation",
+    "title": "Stroke Rehabilitation Exercises",
+    "source": "HealthHub",
+    "youtube_id": "rA6nExkNnFQ",
+    "url": "https://www.youtube.com/embed/rA6nExkNnFQ",
+    "tags": ["stroke", "rehabilitation", "physiotherapy"]
+  },
+  {
+    "id": "stroke_swallowing_safety",
+    "type": "article",
+    "condition": "stroke",
+    "topic": "swallowing safety",
+    "title": "Swallowing Safety After Stroke",
+    "source": "HealthHub",
+    "url": "https://www.healthhub.sg/",
+    "tags": ["stroke", "swallowing", "safety"]
+  },
+  {
+    "id": "heart_failure_daily_weight",
+    "type": "article",
+    "condition": "heart failure",
+    "topic": "daily weight monitoring",
+    "title": "Why Daily Weight Matters in Heart Failure",
+    "source": "HealthHub",
+    "url": "https://www.healthhub.sg/",
+    "tags": ["heart failure", "weight", "fluid"]
+  },
+  {
+    "id": "heart_failure_low_salt",
+    "type": "article",
+    "condition": "heart failure",
+    "topic": "low salt diet",
+    "title": "Reducing Salt for Heart Health",
+    "source": "HealthHub",
+    "url": "https://www.healthhub.sg/",
+    "tags": ["diet", "salt", "heart failure"]
+  },
+  {
+    "id": "copd_inhaler_technique",
+    "type": "video",
+    "condition": "copd",
+    "topic": "inhaler technique",
+    "title": "Correct Inhaler Technique",
+    "source": "HealthHub",
+    "youtube_id": "Rdb3p9RZoR4",
+    "url": "https://www.youtube.com/embed/Rdb3p9RZoR4",
+    "tags": ["copd", "inhaler", "breathing"]
+  },
+  {
+    "id": "copd_breathlessness_plan",
+    "type": "article",
+    "condition": "copd",
+    "topic": "breathlessness action plan",
+    "title": "Managing Breathlessness at Home",
+    "source": "HealthHub",
+    "url": "https://www.healthhub.sg/",
+    "tags": ["copd", "breathlessness", "action plan"]
+  },
+  {
+    "id": "caregiver_respite_aic",
+    "type": "article",
+    "condition": "caregiving",
+    "topic": "caregiver respite",
+    "title": "Caregiver Support and Respite Options",
+    "source": "AIC",
+    "url": "https://www.aic.sg/caregiving/",
+    "tags": ["caregiver", "respite", "support"]
+  }
+]
