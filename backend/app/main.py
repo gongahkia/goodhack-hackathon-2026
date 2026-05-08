@@ -10,6 +10,7 @@ from .config import get_settings
 from .demo import PATIENT, PATIENT_ID, ingest_trigger_records, seed_baseline
 from .graph_queries import backtrace_sources, forward_actions
 from .models import NodeEdit, StatusUpdate
+from .notifications import build_notifications
 from .store import GraphStore, MemoryGraphStore, PostgresGraphStore
 
 settings = get_settings()
