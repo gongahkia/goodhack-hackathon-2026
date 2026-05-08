@@ -42,3 +42,15 @@ export type PatientSummary = {
   living_arrangement: string;
   key_conditions: string[];
 };
+
+export type AppNotification = {
+  id: string;
+  kind: "review" | "approved" | "dismissed" | "edited" | "system" | string;
+  title: string;
+  body: string;
+  created_at: string;
+  href?: string | null;
+  source_node_id?: string | null;
+  node_status?: NodeStatus | null;
+  occurred_at?: string | null;
+};
