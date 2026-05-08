@@ -255,6 +255,7 @@ const dictionaries: Record<Language, Dictionary> = {
     "common.api": "API",
     "common.storage": "存储",
     "common.apply": "申请",
+    "common.reschedule": "重新安排",
     "common.openResource": "打开资源",
     "common.noneYet": "暂无",
     "status.pending_review": "需要审核",
