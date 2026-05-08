@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  background: #eef3ef;
+}
+
+body {
+  margin: 0;
+  color: #17201c;
+  background:
+    linear-gradient(180deg, rgba(217, 242, 226, 0.8), rgba(238, 243, 239, 0.9)),
+    #eef3ef;
+}
+
+button,
+a,
+input,
+textarea {
+  letter-spacing: 0;
+}
+
+.fc {
+  --fc-border-color: #d7dfd9;
+  --fc-today-bg-color: #fff7db;
+  --fc-event-bg-color: #405b48;
+  --fc-event-border-color: #405b48;
+  font-size: 0.78rem;
+}
+
+.fc .fc-toolbar-title {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.fc .fc-button {
+  background: #405b48;
+  border-color: #405b48;
+  border-radius: 8px;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.75rem;
+}
+
+.fc .fc-daygrid-event {
+  border-radius: 6px;
+  padding: 1px 3px;
+}
