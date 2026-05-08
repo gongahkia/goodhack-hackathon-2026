@@ -189,6 +189,34 @@ export default function EventDetailPage({ params }: { params: { id: string } }) 
               </div>
               <p className="mt-3 text-sm text-[#34423a]">{event.payload.description}</p>
               {event.payload.recurrence ? <p className="mt-2 text-sm font-semibold text-moss">{event.payload.recurrence}</p> : null}
+              {appointmentRescheduleUrl(event) ? (
+                <a
+                  className="mt-4 inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-moss px-3 py-2 text-sm font-semibold text-white"
+                  href={appointmentRescheduleUrl(event)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {t("common.reschedule")} <ExternalLink className="h-4 w-4" />
+                </a>
+              ) : null}
+              {references.length > 0 ? (
+                <div className="relative mt-4">
+                  <div className="flex flex-wrap gap-2">
+                    {references.map((reference) => (
+                      <button
+                        className="inline-flex items-center gap-1.5 rounded-full border border-[#cbd8cf] bg-[#f5f8f6] px-3 py-1.5 text-xs font-bold text-moss"
+                        key={reference.id}
+                        onClick={() => setActiveReference((current) => (current === reference.id ? null : reference.id))}
+                      >
+                        <Info className="h-3.5 w-3.5" /> {reference.label}
+                      </button>
+                    ))}
+                  </div>
+                  {activeReference && selectedReference ? (
+                    <ReferenceBubble reference={selectedReference} onClose={() => setActiveReference(null)} />
+                  ) : null}
+                </div>
+              ) : null}
             </article>
 
             <section className="rounded-xl border border-[#dfe8e2] bg-white p-4">
