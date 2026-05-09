@@ -32,6 +32,26 @@ export type EventDetail = KgNode & {
   related_edges: KgEdge[];
   reasoning_log?: ReasoningLog | null;
   reasoning_narrative?: string[];
+  appointment_prep?: AppointmentPrep | null;
+};
+
+export type EvidenceSummary = {
+  id: string;
+  type: string;
+  title?: string | null;
+  recorded_at?: string | null;
+};
+
+export type AppointmentPrep = {
+  appointment_id: string;
+  generated_at: string;
+  title?: string | null;
+  symptoms_to_mention: string[];
+  medication_notes: string[];
+  therapy_mobility_notes: string[];
+  questions_for_clinician: string[];
+  long_term_concerns: string[];
+  evidence: EvidenceSummary[];
 };
 
 export type MemoryProfile = {
@@ -64,6 +84,19 @@ export type CarePlanReview = {
   memory: MemoryProfile;
   memory_instructions: string[];
   narrative: string[];
+};
+
+export type ForecastItem = {
+  id: string;
+  title: string;
+  category: "grant" | "equipment" | "care_service" | "home_modification" | string;
+  status: NodeStatus;
+  target_date?: string | null;
+  summary?: string | null;
+  agency?: string | null;
+  apply_url?: string | null;
+  timeline: Array<{ label: string; detail: string }>;
+  evidence: EvidenceSummary[];
 };
 
 export type PatientSummary = {

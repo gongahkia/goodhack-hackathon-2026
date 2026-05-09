@@ -216,6 +216,165 @@ def event_reasoning_narrative(event: Node, graph: GraphSubset, log: ReasoningLog
     return narrative
 
 
+def build_appointment_prep(event: Node, graph: GraphSubset) -> dict[str, Any] | None:
+    if event.payload.get("action_type") != "appointment":
+        return None
+    sources = backtrace_sources(event, graph.nodes, graph.edges)
+    source_text = " ".join(
+        " ".join(
+            [
+                str(source.payload.get("title") or ""),
+                str(source.payload.get("content", {}).get("notes") or ""),
+                str(source.payload.get("content", {}).get("dose") or ""),
+                str(source.payload.get("content", {}).get("medication") or ""),
+            ]
+        )
+        for source in sources
+    ).lower()
+    condition_text = " ".join(str(node.payload.get("display_name") or node.payload.get("condition_key") or "") for node in graph.nodes if node.type == "inferred_condition").lower()
+    has_parkinsons = "parkinson" in source_text or "parkinson" in condition_text or "parkinson" in str(event.payload.get("title", "")).lower()
+
+    symptoms = ["Any new symptoms since the last visit", "Side effects, missed doses, or changes in daily routine"]
+    medication_notes = ["Bring current medication list and timing pattern"]
+    mobility_notes = ["Mention any near-falls, slower walking, tremor changes, or confidence changes"]
+    questions = ["Ask what changes should trigger an earlier appointment", "Confirm next follow-up timing and who to contact if symptoms worsen"]
+    long_term = ["Check whether any future equipment, therapy, or caregiver support planning should begin now"]
+
+    if has_parkinsons:
+        symptoms = ["Resting tremor changes", "Slowness or stiffness during daily activities", "Any freezing, shuffling, near-falls, or balance concerns"]
+        medication_notes = ["Track Levodopa/Carbidopa timing after meals", "Note any nausea, dizziness, wearing-off, or missed doses"]
+        mobility_notes = ["Share whether seated exercises are being completed", "Ask whether gait or falls assessment is needed before the next review"]
+        questions = [
+            "Should medication timing change if symptoms fluctuate?",
+            "What falls-risk signs should the family watch for?",
+            "Should physiotherapy continue at home or be escalated?",
+        ]
+        long_term = [
+            "Discuss mobility aid readiness and whether an AIC SMF application may be needed later",
+            "Ask when to reassess home safety, caregiver burden, and transport needs",
+        ]
+
+    return {
+        "appointment_id": str(event.id),
+        "generated_at": datetime.now(UTC).isoformat(),
+        "title": event.payload.get("title"),
+        "symptoms_to_mention": symptoms,
+        "medication_notes": medication_notes,
+        "therapy_mobility_notes": mobility_notes,
+        "questions_for_clinician": questions,
+        "long_term_concerns": long_term,
+        "evidence": [_source_summary(source) for source in sources],
+    }
+
+
+def build_forecast(graph: GraphSubset) -> list[dict[str, Any]]:
+    actions = [node for node in graph.nodes if node.type == "scheduled_action" and node.status != "dismissed"]
+    forecast_actions = [
+        action
+        for action in actions
+        if _is_forecast_action(action)
+    ]
+    return [_forecast_card(action, graph) for action in sorted(forecast_actions, key=lambda node: str(node.payload.get("start_at") or ""))]
+
+
+def _is_forecast_action(action: Node) -> bool:
+    title = str(action.payload.get("title") or "")
+    description = str(action.payload.get("description") or "")
+    text = f"{title} {description}".lower()
+    future_date = _parse_datetime(action.payload.get("start_at"))
+    support_keywords = ["grant", "fund", "subsid", "mobility", "wheelchair", "equipment", "home modification", "respite", "hospice"]
+    return bool(
+        action.payload.get("action_type") == "grant"
+        or "apply" in text
+        or future_date
+        and future_date > datetime.now(UTC) + timedelta(days=45)
+        and any(keyword in text for keyword in support_keywords)
+    )
+
+
+def _forecast_card(action: Node, graph: GraphSubset) -> dict[str, Any]:
+    title = str(action.payload.get("title") or "Future care action")
+    description = str(action.payload.get("description") or "")
+    text = f"{title} {description}".lower()
+    category = "care_service"
+    if "grant" in text or "fund" in text or "subsid" in text:
+        category = "grant"
+    elif "mobility" in text or "wheelchair" in text or "aid" in text or "equipment" in text:
+        category = "equipment"
+    elif "home" in text or "modification" in text:
+        category = "home_modification"
+    elif "hospice" in text or "respite" in text:
+        category = "care_service"
+
+    sources = backtrace_sources(action, graph.nodes, graph.edges)
+    grant = _related_grant(action, graph)
+    target_date = action.payload.get("start_at")
+    timeline = [
+        {"label": "Trigger", "detail": _first_source_title(sources) or "Care-plan trajectory identified a future need."},
+        {"label": "Eligibility evidence", "detail": _eligibility_detail(grant, sources)},
+        {"label": "Prep steps", "detail": _prep_detail(category)},
+        {"label": "Application window", "detail": f"Start by {_human_datetime(target_date)}." if target_date else "Review at the forecast checkpoint."},
+        {"label": "Follow-up", "detail": "Recheck status after submission and update the care plan with any approval outcome."},
+    ]
+    return {
+        "id": str(action.id),
+        "title": title,
+        "category": category,
+        "status": action.status,
+        "target_date": target_date,
+        "summary": description,
+        "agency": action.payload.get("agency") or (grant.payload.get("agency") if grant else None),
+        "apply_url": action.payload.get("apply_url") or action.payload.get("url") or (grant.payload.get("url") if grant else None),
+        "timeline": timeline,
+        "evidence": [_source_summary(source) for source in sources],
+    }
+
+
+def _related_grant(action: Node, graph: GraphSubset) -> Node | None:
+    by_id = {node.id: node for node in graph.nodes}
+    for edge in graph.edges:
+        if edge.from_node == action.id:
+            target = by_id.get(edge.to_node)
+            if target and target.type == "grant_opportunity":
+                return target
+    return next((node for node in graph.nodes if node.type == "grant_opportunity" and str(node.payload.get("name", "")).lower() in str(action.payload.get("title", "")).lower()), None)
+
+
+def _source_summary(source: Node) -> dict[str, Any]:
+    return {
+        "id": str(source.id),
+        "type": source.type,
+        "title": source.payload.get("title") or source.payload.get("content", {}).get("title"),
+        "recorded_at": source.payload.get("recorded_at"),
+    }
+
+
+def _first_source_title(sources: list[Node]) -> str | None:
+    if not sources:
+        return None
+    return str(sources[0].payload.get("title") or sources[0].payload.get("content", {}).get("title") or "")
+
+
+def _eligibility_detail(grant: Node | None, sources: list[Node]) -> str:
+    if grant:
+        hints = grant.payload.get("eligibility_hints") or []
+        if hints:
+            return ", ".join(str(hint) for hint in hints[:4])
+    if sources:
+        return "Evidence is linked to source health records and inferred condition trajectory."
+    return "Eligibility evidence should be reviewed before application."
+
+
+def _prep_detail(category: str) -> str:
+    if category == "equipment":
+        return "Prepare diagnosis evidence, mobility notes, caregiver observations, and device quotes if needed."
+    if category == "grant":
+        return "Prepare identity details, citizenship/age evidence, clinical notes, and any supporting cost documents."
+    if category == "home_modification":
+        return "Prepare home safety notes, photos, clinical need evidence, and contractor or equipment estimates."
+    return "Prepare clinical notes, care needs, caregiver capacity, and service-provider requirements."
+
+
 async def _exa_search(query: str, api_key: str, allowlist: list[str]) -> list[dict[str, Any]]:
     async with httpx.AsyncClient(timeout=8) as client:
         response = await client.post(

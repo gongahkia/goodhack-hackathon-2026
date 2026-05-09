@@ -107,6 +107,7 @@ The North Star metric is **caregiver-hours saved per week** while maintaining or
 - **Domestic helper user mode**: distinct UX, language-first, with appropriate scoping of what they can approve vs. what escalates to family.
 - **Real grant integration**: where APIs exist (or partnerships can be formed with AIC / SG Enable / town councils), move from handoff links to true one-tap apply.
 - **Caregiver-to-caregiver knowledge sharing**: anonymized, opt-in patterns (e.g., "other caregivers of dementia patients found this resource useful").
+- **Multiplayer and caregiver assignment**: So multiple families can 
 
 ---
 

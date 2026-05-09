@@ -12,7 +12,16 @@ from .graph_queries import backtrace_sources, forward_actions
 from .models import NodeEdit, StatusUpdate
 from .notifications import build_notifications
 from .store import GraphStore, MemoryGraphStore, PostgresGraphStore
-from .v2 import build_calendar_ics, build_care_plan_review, build_memory_profile, event_reasoning_narrative, search_verified_grants, search_verified_resources
+from .v2 import (
+    build_appointment_prep,
+    build_calendar_ics,
+    build_care_plan_review,
+    build_forecast,
+    build_memory_profile,
+    event_reasoning_narrative,
+    search_verified_grants,
+    search_verified_resources,
+)
 
 settings = get_settings()
 store: GraphStore = (
@@ -116,6 +125,7 @@ async def event_detail(event_id: UUID) -> dict:
         "related_edges": [edge.model_dump(mode="json") for edge in related_edges],
         "reasoning_log": log.model_dump(mode="json") if log else None,
         "reasoning_narrative": event_reasoning_narrative(node, graph, log),
+        "appointment_prep": build_appointment_prep(node, graph),
     }
 
 
@@ -150,6 +160,11 @@ async def care_plan_review() -> dict:
     graph = await store.graph_subset(PATIENT_ID)
     logs = await store.list_reasoning_logs()
     return build_care_plan_review(graph, logs)
+
+
+@app.get("/forecast")
+async def forecast() -> list[dict]:
+    return build_forecast(await store.graph_subset(PATIENT_ID))
 
 
 @app.get("/resources/search")

@@ -10,7 +10,16 @@ from app.demo import PATIENT_ID, ingest_trigger_records, seed_baseline
 from app.graph_queries import backtrace_sources, forward_actions
 from app.notifications import build_notifications
 from app.store import MemoryGraphStore
-from app.v2 import build_calendar_ics, build_care_plan_review, build_memory_profile, search_verified_grants, search_verified_resources, verify_live_result
+from app.v2 import (
+    build_appointment_prep,
+    build_calendar_ics,
+    build_care_plan_review,
+    build_forecast,
+    build_memory_profile,
+    search_verified_grants,
+    search_verified_resources,
+    verify_live_result,
+)
 
 
 @pytest.mark.asyncio
@@ -195,3 +204,25 @@ async def test_v2_verified_search_uses_allowlist_and_curated_fallback():
     assert resources
     assert all(item["verification_status"] == "safe_to_show" for item in resources)
     assert any("Seniors' Mobility" in item["title"] for item in grants)
+
+
+@pytest.mark.asyncio
+async def test_v2_appointment_prep_and_forecast():
+    store = MemoryGraphStore()
+    await store.init()
+    await seed_baseline(store)
+    trigger = await ingest_trigger_records(store)
+    await run_agent_for_trigger(store, Settings(demo_agent_mode="scripted"), PATIENT_ID, trigger["node_ids"][0])
+
+    graph = await store.graph_subset(PATIENT_ID)
+    appointment = next(node for node in graph.nodes if node.type == "scheduled_action" and node.payload["action_type"] == "appointment")
+    prep = build_appointment_prep(appointment, graph)
+    forecast = build_forecast(graph)
+
+    assert prep
+    assert any("falls" in question.lower() for question in prep["questions_for_clinician"])
+    assert prep["evidence"]
+    assert any(item["title"] == "Apply for Seniors' Mobility and Enabling Fund" for item in forecast)
+    smf = next(item for item in forecast if item["title"] == "Apply for Seniors' Mobility and Enabling Fund")
+    assert smf["category"] == "grant"
+    assert any(step["label"] == "Eligibility evidence" for step in smf["timeline"])

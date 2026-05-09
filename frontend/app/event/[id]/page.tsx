@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { ChangeEvent } from "react";
-import { BookOpen, ExternalLink, FileText, ImageIcon, Info, Paperclip, Save, ThumbsDown, ThumbsUp, Trash2, Upload, X } from "lucide-react";
+import { BookOpen, ClipboardList, ExternalLink, FileText, ImageIcon, Info, Paperclip, Save, ThumbsDown, ThumbsUp, Trash2, Upload, X } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { BottomNav } from "@/components/bottom-nav";
 import { useNotifications } from "@/components/notifications-provider";
@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { formatDate, recordTitle, shortDate } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
-import type { EventDetail, KgNode } from "@/lib/types";
+import type { AppointmentPrep, EventDetail, KgNode } from "@/lib/types";
 
 type EventAttachment = {
   id: string;
@@ -222,6 +222,8 @@ export default function EventDetailPage({ params }: { params: { id: string } }) 
                 </div>
               ) : null}
             </article>
+
+            {event.appointment_prep ? <AppointmentPrepPanel prep={event.appointment_prep} /> : null}
 
             <section className="rounded-xl border border-[#dfe8e2] bg-white p-4">
               <h2 className="font-bold">{t("event.review")}</h2>
@@ -489,6 +491,52 @@ function ReferenceBubble({ reference, onClose }: { reference: CareReference; onC
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function AppointmentPrepPanel({ prep }: { prep: AppointmentPrep }) {
+  const { t } = useI18n();
+  return (
+    <section className="rounded-xl border border-[#dfe8e2] bg-white p-4">
+      <h2 className="inline-flex items-center gap-2 font-bold">
+        <ClipboardList className="h-4 w-4 text-moss" /> {t("event.appointmentPrep")}
+      </h2>
+      <div className="mt-3 grid gap-3">
+        <PrepList title={t("event.prepSymptoms")} items={prep.symptoms_to_mention} />
+        <PrepList title={t("event.prepMedication")} items={prep.medication_notes} />
+        <PrepList title={t("event.prepMobility")} items={prep.therapy_mobility_notes} />
+        <PrepList title={t("event.prepQuestions")} items={prep.questions_for_clinician} />
+        <PrepList title={t("event.prepLongTerm")} items={prep.long_term_concerns} />
+      </div>
+      {prep.evidence.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {prep.evidence.map((item) => (
+            <span className="rounded-full bg-mint px-3 py-1.5 text-xs font-semibold text-moss" key={item.id}>
+              {item.title || item.type}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function PrepList({ title, items }: { title: string; items: string[] }) {
+  if (items.length === 0) {
+    return null;
+  }
+  return (
+    <div className="rounded-lg bg-[#f5f8f6] p-3">
+      <p className="text-xs font-bold uppercase text-moss">{title}</p>
+      <ul className="mt-2 space-y-1.5 text-sm text-[#34423a]">
+        {items.map((item) => (
+          <li className="flex gap-2" key={item}>
+            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-moss" />
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

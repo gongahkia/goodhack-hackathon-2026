@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, ExternalLink, Minus, Plus, Sparkles, ThumbsDown, ThumbsUp } from "lucide-react";
+import { ArrowRight, ClipboardList, ExternalLink, Minus, Plus, Sparkles, ThumbsDown, ThumbsUp } from "lucide-react";
 import { clsx } from "clsx";
 import { AppHeader } from "@/components/app-header";
 import { BottomNav } from "@/components/bottom-nav";
@@ -29,7 +29,11 @@ export default function ReviewPage() {
     const scheduled = await api.events();
     const enriched = await Promise.all(
       scheduled.map(async (event) => {
-        if (event.payload.action_type !== "grant" && !String(event.payload.title || "").toLowerCase().includes("apply")) {
+        const shouldEnrich =
+          event.payload.action_type === "grant" ||
+          event.payload.action_type === "appointment" ||
+          String(event.payload.title || "").toLowerCase().includes("apply");
+        if (!shouldEnrich) {
           return event;
         }
         return api.event(event.id).catch(() => event);
@@ -100,6 +104,7 @@ export default function ReviewPage() {
               <StatusBadge status={event.status} />
             </div>
             <p className="mt-3 text-sm text-[#34423a]">{event.payload.description}</p>
+            {appointmentPrep(event) ? <ReviewPrepBlock event={event} /> : null}
             <div className="mt-4 rounded-lg border border-[#dfe8e2] bg-[#f5f8f6] p-3">
               <p className="inline-flex items-center gap-2 text-sm font-bold text-ink">
                 <Sparkles className="h-4 w-4 text-moss" /> {t("review.scoreTitle")}
@@ -190,6 +195,34 @@ export default function ReviewPage() {
       </section>
       <BottomNav />
     </>
+  );
+}
+
+function appointmentPrep(event: ReviewEvent) {
+  return "appointment_prep" in event ? event.appointment_prep : null;
+}
+
+function ReviewPrepBlock({ event }: { event: ReviewEvent }) {
+  const { t } = useI18n();
+  const prep = appointmentPrep(event);
+  if (!prep) {
+    return null;
+  }
+  const items = [...prep.symptoms_to_mention.slice(0, 2), ...prep.questions_for_clinician.slice(0, 2)];
+  return (
+    <div className="mt-4 rounded-lg border border-[#dfe8e2] bg-[#f5f8f6] p-3">
+      <p className="inline-flex items-center gap-2 text-sm font-bold text-ink">
+        <ClipboardList className="h-4 w-4 text-moss" /> {t("review.appointmentPrep")}
+      </p>
+      <ul className="mt-2 space-y-1.5 text-sm text-[#34423a]">
+        {items.map((item) => (
+          <li className="flex gap-2" key={item}>
+            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-moss" />
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

@@ -1,4 +1,4 @@
-import type { AppNotification, CarePlanReview, EventDetail, KgNode, MemoryProfile, PatientSummary, ReasoningLog, VerifiedContent } from "./types";
+import type { AppNotification, CarePlanReview, EventDetail, ForecastItem, KgNode, MemoryProfile, PatientSummary, ReasoningLog, VerifiedContent } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
@@ -27,6 +27,7 @@ export const api = {
   calendarFeedUrl: () => `${API_BASE}/calendar/feed.ics`,
   memory: () => request<MemoryProfile>("/memory"),
   carePlanReview: () => request<CarePlanReview>("/care-plan/review"),
+  forecast: () => request<ForecastItem[]>("/forecast"),
   resourceSearch: (topic: string, condition?: string) =>
     request<VerifiedContent[]>(`/resources/search?topic=${encodeURIComponent(topic)}${condition ? `&condition=${encodeURIComponent(condition)}` : ""}`),
   grantSearch: (condition: string) => request<VerifiedContent[]>(`/grants/search?condition=${encodeURIComponent(condition)}`),
