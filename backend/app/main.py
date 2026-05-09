@@ -22,8 +22,10 @@ from .v2 import (
     build_forecast,
     build_memory_profile,
     event_reasoning_narrative,
+    normalize_scheduling_payload,
     search_verified_grants,
     search_verified_resources,
+    with_scheduling_metadata,
 )
 
 settings = get_settings()
@@ -147,7 +149,7 @@ async def record_detail(record_id: UUID) -> dict:
 @app.get("/events")
 async def events() -> list[dict]:
     nodes = await store.list_nodes(PATIENT_ID, ["scheduled_action"])
-    return [node.model_dump(mode="json") for node in nodes if node.status != "dismissed"]
+    return [with_scheduling_metadata(node).model_dump(mode="json") for node in nodes if node.status != "dismissed"]
 
 
 @app.get("/events/{event_id}")
@@ -156,6 +158,7 @@ async def event_detail(event_id: UUID) -> dict:
     node = await store.get_node(event_id)
     if not node:
         raise HTTPException(404, "Event not found")
+    node = with_scheduling_metadata(node)
     related_edges = [edge for edge in graph.edges if edge.from_node == event_id or edge.to_node == event_id]
     related_ids = {edge.from_node for edge in related_edges} | {edge.to_node for edge in related_edges}
     related_nodes = [item for item in graph.nodes if item.id in related_ids and item.id != event_id]
@@ -256,7 +259,12 @@ async def update_status(node_id: UUID, update: StatusUpdate) -> dict:
 
 @app.patch("/nodes/{node_id}")
 async def edit_node(node_id: UUID, edit: NodeEdit) -> dict:
-    node = await store.update_node_payload(node_id, edit.payload, edit.status)
+    existing = await store.get_node(node_id)
+    payload = edit.payload
+    if existing and existing.type == "scheduled_action":
+        payload = normalize_scheduling_payload({**existing.payload, **edit.payload})
+        payload = {key: value for key, value in payload.items() if key in edit.payload or key in {"timing_type", "urgency", "estimated_effort_minutes", "movable_window", "rest_interrupt_allowed", "scheduling_reason"}}
+    node = await store.update_node_payload(node_id, payload, edit.status)
     if not node:
         raise HTTPException(404, "Node not found")
     feedback = await store.create_node(

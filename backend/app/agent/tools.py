@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 from ..config import Settings
 from ..data import condition_trajectories, educational_resources, grants_database
 from ..store import GraphStore
-from ..v2 import search_verified_resources
+from ..v2 import normalize_scheduling_payload, search_verified_resources
 
 
 class AgentToolbox:
@@ -152,6 +152,7 @@ class AgentToolbox:
     async def create_node(self, type: str, payload: dict[str, Any], status: str = "pending_review") -> dict[str, str]:
         payload = {"patient_id": self.patient_id, **payload}
         if type == "scheduled_action":
+            payload = normalize_scheduling_payload(payload)
             node_id = uuid4()
             self.pending_scheduled_actions[node_id] = {"type": type, "payload": payload, "status": status}
             return {"node_id": str(node_id), "state": "staged_until_derived_from_edge"}

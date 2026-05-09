@@ -216,6 +216,54 @@ def event_reasoning_narrative(event: Node, graph: GraphSubset, log: ReasoningLog
     return narrative
 
 
+def normalize_scheduling_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    next_payload = dict(payload)
+    action_type = str(next_payload.get("action_type") or "task")
+    title = str(next_payload.get("title") or "")
+    description = str(next_payload.get("description") or "")
+    text = f"{title} {description}".lower()
+
+    if not next_payload.get("timing_type"):
+        if action_type in {"medication", "appointment"}:
+            next_payload["timing_type"] = "fixed_time"
+        elif action_type == "grant" or "deadline" in text or "apply" in text:
+            next_payload["timing_type"] = "deadline"
+        elif action_type in {"therapy", "task"}:
+            next_payload["timing_type"] = "flexible_window"
+        else:
+            next_payload["timing_type"] = "movable"
+
+    if not next_payload.get("urgency"):
+        if action_type == "medication":
+            next_payload["urgency"] = "clinical"
+        elif action_type == "appointment":
+            next_payload["urgency"] = "clinical"
+        elif action_type == "grant":
+            next_payload["urgency"] = "financial"
+        else:
+            next_payload["urgency"] = "routine"
+
+    if not next_payload.get("estimated_effort_minutes"):
+        next_payload["estimated_effort_minutes"] = _default_effort_minutes(action_type, text)
+
+    if not next_payload.get("movable_window"):
+        next_payload["movable_window"] = _default_movable_window(next_payload["timing_type"], action_type, next_payload.get("start_at"))
+
+    if "rest_interrupt_allowed" not in next_payload:
+        next_payload["rest_interrupt_allowed"] = next_payload["urgency"] in {"clinical", "financial"} and next_payload["timing_type"] in {"fixed_time", "deadline"}
+
+    if not next_payload.get("scheduling_reason"):
+        next_payload["scheduling_reason"] = _scheduling_reason(next_payload["timing_type"], action_type)
+
+    return next_payload
+
+
+def with_scheduling_metadata(node: Node) -> Node:
+    if node.type != "scheduled_action":
+        return node
+    return node.model_copy(update={"payload": normalize_scheduling_payload(node.payload)})
+
+
 def build_appointment_prep(event: Node, graph: GraphSubset) -> dict[str, Any] | None:
     if event.payload.get("action_type") != "appointment":
         return None
@@ -493,6 +541,51 @@ def _prep_detail(category: str) -> str:
     if category == "home_modification":
         return "Prepare home safety notes, photos, clinical need evidence, and contractor or equipment estimates."
     return "Prepare clinical notes, care needs, caregiver capacity, and service-provider requirements."
+
+
+def _default_effort_minutes(action_type: str, text: str) -> int:
+    if action_type == "medication":
+        return 5
+    if action_type == "therapy":
+        return 20
+    if action_type == "appointment":
+        return 90
+    if action_type == "grant":
+        return 45
+    if "document" in text or "apply" in text:
+        return 45
+    return 20
+
+
+def _default_movable_window(timing_type: str, action_type: str, start_at: Any) -> dict[str, str] | None:
+    if timing_type == "fixed_time":
+        return None
+    try:
+        start = datetime.fromisoformat(str(start_at).replace("Z", "+00:00")) if start_at else None
+    except ValueError:
+        start = None
+    if start is None:
+        return {"start": "09:00", "end": "18:00"}
+    local_hour = start.hour
+    if action_type == "therapy" or local_hour < 12:
+        return {"start": "08:00", "end": "12:00"}
+    if local_hour >= 18:
+        return {"start": "18:00", "end": "21:00"}
+    return {"start": "09:00", "end": "17:00"}
+
+
+def _scheduling_reason(timing_type: str, action_type: str) -> str:
+    if timing_type == "fixed_time":
+        if action_type == "medication":
+            return "Medication keeps its prescribed timing unless the caregiver edits it."
+        if action_type == "appointment":
+            return "Appointment time comes from the clinic booking and should only move through rescheduling."
+        return "This action has a fixed clinical or logistical time."
+    if timing_type == "deadline":
+        return "Deadline-based actions can move earlier, but should not move past the target date."
+    if timing_type == "flexible_window":
+        return "This action can move inside the caregiver-approved care window."
+    return "This action is movable unless the caregiver marks it fixed."
 
 
 async def _verify_live_results_with_openai(results: list[dict[str, Any]], settings: Settings, query: str) -> list[dict[str, Any]]:

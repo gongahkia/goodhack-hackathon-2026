@@ -16,14 +16,84 @@ The North Star metric is **caregiver-hours saved per week** while maintaining or
 
 ---
 
+## Higher-Level Functional Requirements
+
+These requirements sharpen the product around a voice-first caregiver workflow: many older caregivers, elderly patients, and domestic helpers will not type quickly or reliably. The app should let them speak naturally, then convert that speech into structured notes, appointment questions, forecast decisions, research tasks, and schedule actions.
+
+### FR1 — Voice-first capture as the primary input
+
+- The product should support dictation-first note taking for caregivers who prefer speaking over typing.
+- Voice capture must work for quick, unstructured thoughts such as: "for 28 Jan appointment, remind me to ask doctor about the new lump."
+- Captured speech should be converted into structured care intents: appointment question, symptom note, decision deadline, follow-up task, document reminder, grant research task, or general caregiver note.
+- Text entry remains available, but the primary experience should assume users speak most inputs.
+
+### FR2 — Local speech, dialect, and multilingual accuracy
+
+- Dictation quality is a strategic differentiator, not a convenience feature.
+- Speech recognition should be optimized for Singapore caregiver speech patterns, including code-switching across English, Mandarin, Malay, Tamil, Singlish, Hokkien/Teochew/Cantonese loan phrases where feasible, Bahasa Indonesia, and Tagalog.
+- The system should preserve clinically relevant terms even when the phrasing is informal, locally expressed, or partially multilingual.
+- The app should ask lightweight clarification questions when transcription confidence is low or when a date, body part, medication, symptom, or clinician instruction is ambiguous.
+
+### FR3 — Natural-language care intent extraction
+
+- The app should parse spoken inputs into: who the note concerns, what happened, when it matters, which appointment or decision it relates to, urgency, required follow-up, and source confidence.
+- Date handling must support explicit dates, relative dates, and appointment-linked dates, then confirm unclear dates before scheduling.
+- Extracted items should be linked to records, appointments, forecast cards, and reasoning logs so the user can trace why a reminder or recommendation exists.
+
+### FR4 — Appointment note capture and prep
+
+- Caregivers should be able to speak thoughts as they occur and have them automatically attached to the relevant upcoming appointment.
+- Appointment briefs should combine caregiver-dictated questions, recent symptoms, medication adherence issues, unresolved clinician advice, and forecast concerns.
+- Example: "for 28 Jan appointment, remind me to ask doctor about the new lump" should become an appointment talking point and, if clinically relevant, a follow-up reminder after the appointment.
+
+### FR5 — Long-term decision planning
+
+- The app should turn spoken long-horizon concerns into forecast items with decision deadlines, key milestones, research tasks, and scheduled check-ins.
+- Example: "doctor said today might want to consider wheelchair, I have to decide by 15 June, help me settle" should create a wheelchair decision forecast ending on 15 June.
+- Forecast items should include what to decide, why it matters, likely options, relevant schemes or subsidies, required documents, care tradeoffs, and recommended dates to review progress.
+
+### FR6 — Automated backend research for policies and resources
+
+- For long-term decisions, the backend should research relevant Singapore policies, grants, subsidies, care services, and eligibility requirements using curated or allowlisted sources.
+- Research output should be summarized into caregiver-readable notes, source links, evidence snippets, missing information, and concrete next actions.
+- The system should distinguish durable curated knowledge from time-sensitive policy facts that require freshness checks.
+
+### FR7 — Availability-aware planning algorithm
+
+- The scheduler should place research tasks, documentation tasks, family discussions, application windows, and decision check-ins into available caregiver time blocks.
+- Fixed commitments such as appointments and medication remain fixed; research and preparation tasks should be flexible and moved around protected rest, work hours, helper availability, and family constraints.
+- The planning algorithm should optimize for feasibility, urgency, caregiver burden, and deadline risk rather than simply adding more tasks to the calendar.
+
+### FR8 — Human confirmation and correction
+
+- Voice-derived actions should be reviewable before they become high-impact schedule items.
+- The caregiver should be able to correct transcript text, date interpretation, task type, appointment linkage, and deadline.
+- Corrections should feed back into personalization so future transcription, intent parsing, and scheduling better match that household.
+
+### FR9 — Evidence, safety, and auditability
+
+- Every voice-derived action, research note, forecast item, and scheduled task should keep provenance: original transcript, normalized interpretation, source records, researched sources, and scheduling rationale.
+- The system should not convert vague or clinically risky speech into definitive medical advice. It should frame uncertain items as questions for the clinician or caregiver review tasks.
+- Policy and grant recommendations must remain source-linked and freshness-checked before being shown as actionable.
+
+### FR10 — Quality metrics for differentiation
+
+- Dictation accuracy for local speech patterns: transcription word error rate, clinically important term accuracy, date accuracy, and code-switch handling.
+- Intent extraction quality: correct appointment linking, deadline extraction, task classification, and clarification rate.
+- Planning quality: percentage of long-term actions scheduled before deadlines, caregiver load balance, protected-rest preservation, and number of avoided last-minute tasks.
+- Trust quality: percentage of recommendations with valid provenance, caregiver correction rate, approval rate, and usefulness rating.
+
+---
+
 ## Architecture Overview
 
 - **Knowledge graph data spine:** `nodes`, `edges`, `reasoning_logs`, and raw NEHR-style records. Nodes represent `nehr_record`, `inferred_condition`, `scheduled_action`, `recommended_resource`, `grant_opportunity`, and `caregiver_feedback`. Edges encode `derived_from`, `triggers`, `recommends`, `applies_to`, and `feedback_on`.
 - **OpenAI reasoning layer:** OpenAI Responses API function-tool loop reads records, checks graph context, searches curated Singapore grants/resources, reads condition trajectories, creates graph nodes, and logs tool calls/results.
+- **Voice and intent layer:** dictation captures caregiver speech, transcribes local multilingual inputs, extracts care intents, resolves dates and appointment links, and stores original transcript plus normalized interpretation as auditable graph context.
 - **Provenance guardrail:** every `scheduled_action` must be linked by a `derived_from` edge to a source `nehr_record` or `inferred_condition`; ungrounded care actions are rejected.
 - **Care intelligence layer:** caregiver approvals, dismissals, edits, usefulness scores, and steering signals become graph feedback that conditions future low-risk recommendations while preserving high-priority medication, falls-risk, appointment, and grant-deadline actions.
 - **Singapore resource layer:** curated condition trajectories, AIC/MOH/SG Enable/CHAS-style grant data, verified resources, and allowlisted live search are used to keep recommendations local, relevant, and auditable.
-- **User experience layer:** mobile-first Next.js app with calendar, agenda, forecast, review, records, event detail, reasoning trail, settings, notifications, multilingual labels, calendar export, and subscription feed.
+- **User experience layer:** mobile-first Next.js app with voice capture, calendar, agenda, forecast, review, records, event detail, reasoning trail, settings, notifications, multilingual labels, calendar export, and subscription feed.
 - **Deployment path:** Next.js frontend, FastAPI backend, Supabase Postgres for production persistence, with in-memory storage and scripted reasoning fallback for local demos when external services are absent.
 
 ---
@@ -90,14 +160,18 @@ The North Star metric is **caregiver-hours saved per week** while maintaining or
 - **Memory layer**: caregiver Approve/Dismiss/Edit signals now condition future reasoning. If a caregiver consistently dismisses dietary suggestions, the agent down-weights them. Stored as structured preferences + raw event log.
 - **Scheduled re-reasoning**: nightly job re-examines the full record set per patient and surfaces "what's changed, what should I anticipate?" updates, not just record-triggered updates.
 - **Calendar export and subscription integrations**: provide standards-based calendar export (`.ics`) and a stable subscription feed that external calendar apps can consume directly. Caregivers should be able to add the provisioned care schedule to Apple Calendar, Google Calendar, Outlook, and similar apps, with updates flowing from Caregiver Companion into their existing daily calendar workflow.
+- **Voice-intake foundation**: add a quick-capture flow for spoken or pasted caregiver notes. v2 may begin with browser or mobile OS dictation plus text review, but the backend contract should already model transcript, normalized interpretation, confidence, extracted date, appointment link, task type, and provenance.
+- **Appointment question capture**: allow a caregiver note to become a linked appointment talking point, with review before it is promoted to the appointment brief.
+- **Decision forecast capture**: allow a caregiver note to become a long-term forecast item with target decision date, researched action plan, and scheduled prep checkpoints.
 - **Agenda intelligence upgrades**: learn caregiver preferences for task ordering inside flexible blocks, protect rest blocks unless a task is clinically urgent, and explain why any task must happen at a specific time instead of being movable within the block.
-- **Forecast intelligence upgrades**: keep grant, hospice, equipment, respite-care, and home-modification timelines updated as records change; flag missing documents early; and surface conflicts between forecast deadlines and the caregiver's weekly capacity.
+- **Forecast intelligence upgrades**: keep grant, hospice, equipment, respite-care, wheelchair/mobility-aid, and home-modification timelines updated as records or caregiver-dictated concerns change; flag missing documents early; and surface conflicts between forecast deadlines and the caregiver's weekly capacity.
 - **Longitudinal appointment prep**: appointment talking points become a longitudinal brief that tracks recurring concerns, previously asked questions, unresolved clinician advice, and future risks that should be revisited at the next consultation.
 - **Caregiver review intelligence**: expose human-in-the-loop decisions from notifications, action detail cards, and review surfaces rather than requiring a dedicated bottom-tab destination. Caregivers can approve/dismiss actions, rate usefulness, leave notes, and steer future suggestions toward "more", "less", or "simpler" recommendations. These signals feed memory and future reasoning.
 - **Proper evaluation harness**:
   - Golden test set of synthetic patient records with expected schedules.
   - Per-decision eval: was the provenance correct? Was the reasoning sound? Was the action appropriate?
   - Hallucination detection: any task without a valid provenance edge fails eval.
+  - Voice-intent eval: transcript fixtures should verify date extraction, appointment linkage, task classification, long-term deadline creation, and safe clarification behavior.
   - Human eval workflow for clinician-graded sample.
 
 ---
@@ -111,7 +185,9 @@ The North Star metric is **caregiver-hours saved per week** while maintaining or
 - **Fixed vs flexible task semantics**: every scheduled action should declare whether it is fixed-time, flexible-within-block, deadline-based, or movable. Medication, appointments, and grant deadlines should stay fixed unless edited; therapy, education, documentation, and low-risk reminders should be movable within caregiver-approved windows.
 - **Rest-aware agenda validation**: the planner should flag low-risk flexible tasks that land inside protected rest, suggest alternate morning/evening blocks, and explain when an action must interrupt rest because it is clinically or financially urgent.
 - **Caregiver capacity signals**: blocks should show load and overload state, including number of tasks, estimated effort, urgency mix, and whether the caregiver has a realistic rest opportunity that day.
-- **Sea-Lion multilingual + voice**: voice readout of schedule and prognosis in English, Mandarin, Malay, Tamil, Bahasa Indonesia, Tagalog. Critical for elderly direct use and helper accessibility.
+- **Local multilingual dictation engine**: production-grade speech-to-text and intent parsing for Singapore caregiver speech, including English, Mandarin, Malay, Tamil, Bahasa Indonesia, Tagalog, Singlish/code-switching, and priority dialect phrases where feasible.
+- **Sea-Lion multilingual + voice output**: voice readout of schedule and prognosis in English, Mandarin, Malay, Tamil, Bahasa Indonesia, Tagalog. Critical for elderly direct use and helper accessibility.
+- **Clarification dialogue**: when dictated notes are ambiguous, the app asks short follow-up questions to confirm dates, symptoms, appointments, deadlines, and whether the item should become a reminder, appointment question, or forecast decision.
 - **Domestic helper user mode**: distinct UX, language-first, with appropriate scoping of what they can approve vs. what escalates to family.
 - **Real grant integration**: where APIs exist (or partnerships can be formed with AIC / SG Enable / town councils), move from handoff links to true one-tap apply.
 - **Caregiver-to-caregiver knowledge sharing**: anonymized, opt-in patterns (e.g., "other caregivers of dementia patients found this resource useful").
@@ -135,6 +211,8 @@ The North Star metric is **caregiver-hours saved per week** while maintaining or
   - Expo replacement work: Next.js routing/pages, DOM/browser APIs such as `window.print`, file inputs, iframe embeds, and `localStorage`, FullCalendar's web component, Tailwind/shadcn web styling, HTML anchors/forms, and web-only attachment handling.
   - Recommended path: deploy the MVP as web first; if native mobile is needed, build a dedicated `mobile/` Expo app against the existing FastAPI backend rather than converting the Next.js frontend in place.
 - **Adaptive rest-preserving scheduler**: move from static time blocks to a scheduling engine that learns caregiver capacity, protects rest by default, reschedules movable tasks around fixed commitments, and records why any rest interruption was necessary.
+- **Research-to-schedule automation**: long-term caregiver decisions automatically expand into policy research notes, eligibility checks, document collection tasks, family discussion prompts, application checkpoints, and final decision reminders placed into available schedule windows.
+- **Codex architecture documentation skill**: create and use a Codex-specific skill for diagram and architecture generation so the team can regenerate system diagrams, data-flow maps, agent-tool flowcharts, deployment views, and roadmap architecture docs directly from the codebase and product requirements.
 - **Caregiver burden evaluation**: include rest protection, block overload, avoidable interruptions, and task-movement quality in the evaluation harness so the system is measured not only on clinical correctness but also on whether it reduces mental clutter.
 - **Expansion to chronic disease management** beyond elderly (diabetes, oncology survivorship, mental health).
 - **Regional expansion** to Malaysia, Indonesia, Thailand — Sea-Lion's multilingual capability becomes a strategic moat.

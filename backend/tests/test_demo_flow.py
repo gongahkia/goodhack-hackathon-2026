@@ -43,9 +43,14 @@ async def test_demo_flow_creates_grounded_actions():
     edges = await store.list_edges()
     for action in actions:
         assert any(edge.from_node == action.id and edge.type == "derived_from" for edge in edges)
+        assert action.payload["timing_type"] in {"fixed_time", "flexible_window", "deadline", "movable"}
+        assert action.payload["urgency"] in {"clinical", "financial", "routine"}
+        assert action.payload["estimated_effort_minutes"] > 0
+        assert action.payload["scheduling_reason"]
 
     grant_tasks = [action for action in actions if "Seniors' Mobility" in action.payload["title"]]
     assert len(grant_tasks) == 1
+    assert grant_tasks[0].payload["timing_type"] == "deadline"
 
 
 @pytest.mark.asyncio

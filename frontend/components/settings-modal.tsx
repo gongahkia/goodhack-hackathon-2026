@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Activity, BellRing, Check, MonitorSmartphone, Moon, RefreshCw, Smartphone, Sun, Wifi, X } from "lucide-react";
+import { Activity, BellRing, Check, MonitorSmartphone, Moon, RefreshCw, ShieldCheck, Smartphone, Sun, Wifi, X } from "lucide-react";
 import { clsx } from "clsx";
 import { useNotifications } from "@/components/notifications-provider";
 import { api } from "@/lib/api";
@@ -14,14 +14,18 @@ type AppPreferences = {
   notificationBadges: boolean;
   offlineCache: boolean;
   breakBufferMinutes: number;
+  restWindows: RestWindow[];
 };
+type RestWindow = { id: string; label: string; start: string; end: string; enabled: boolean };
 
 const PREFERENCES_KEY = "caregiver-companion-preferences";
+const defaultRestWindows: RestWindow[] = [{ id: "midday", label: "Protected rest", start: "12:00", end: "18:00", enabled: true }];
 const defaultPreferences: AppPreferences = {
   criticalAlerts: true,
   notificationBadges: true,
   offlineCache: true,
-  breakBufferMinutes: 10
+  breakBufferMinutes: 10,
+  restWindows: defaultRestWindows
 };
 
 const themeOptions = [
@@ -61,6 +65,13 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
 
   function togglePreference(key: "criticalAlerts" | "notificationBadges" | "offlineCache") {
     setPreferences((current) => ({ ...current, [key]: !current[key] }));
+  }
+
+  function updateRestWindow(id: string, patch: Partial<RestWindow>) {
+    setPreferences((current) => ({
+      ...current,
+      restWindows: current.restWindows.map((window) => (window.id === id ? { ...window, ...patch } : window))
+    }));
   }
 
   async function refreshCareReview() {
@@ -165,6 +176,34 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                   value={preferences.breakBufferMinutes}
                 />
               </label>
+            </div>
+          </section>
+
+          <section>
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-moss" />
+              <h3 className="font-bold">{t("settings.restWindows")}</h3>
+            </div>
+            <p className="mt-2 text-sm text-[#536159]">{t("settings.restWindowsDescription")}</p>
+            <div className="mt-3 space-y-2">
+              {preferences.restWindows.map((window) => (
+                <div className="rounded-lg border border-[#dfe8e2] p-3" key={window.id}>
+                  <div className="flex items-center justify-between gap-3">
+                    <input
+                      className="min-w-0 flex-1 rounded-lg border border-[#cbd8cf] px-3 py-2 text-sm font-bold text-ink"
+                      onChange={(event) => updateRestWindow(window.id, { label: event.target.value })}
+                      value={window.label}
+                    />
+                    <button className={clsx("h-6 w-11 rounded-full p-1 transition", window.enabled ? "bg-moss" : "bg-[#dfe8e2]")} onClick={() => updateRestWindow(window.id, { enabled: !window.enabled })} type="button">
+                      <span className={clsx("block h-4 w-4 rounded-full bg-white transition", window.enabled ? "translate-x-5" : "translate-x-0")} />
+                    </button>
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <input className="rounded-lg border border-[#cbd8cf] px-3 py-2 text-sm font-bold text-ink" onChange={(event) => updateRestWindow(window.id, { start: event.target.value })} type="time" value={window.start} />
+                    <input className="rounded-lg border border-[#cbd8cf] px-3 py-2 text-sm font-bold text-ink" onChange={(event) => updateRestWindow(window.id, { end: event.target.value })} type="time" value={window.end} />
+                  </div>
+                </div>
+              ))}
             </div>
           </section>
 
