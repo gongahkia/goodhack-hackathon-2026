@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, Field
 
 from .config import Settings
+from .data import singapore_support_corpus
 from .models import Node
 from .store import GraphStore
 from .v2 import exa_search_web, search_verified_grants, search_verified_resources, tinyfish_search_web
@@ -75,17 +76,13 @@ class ResearchToolAdapter(Protocol):
 class DefaultResearchToolAdapter:
     async def search(self, question: ResearchQuestion, settings: Settings) -> list[ResearchSource]:
         domains = _domains_for_tier(question.source_policy)
-        results: list[ResearchSource] = []
+        results: list[ResearchSource] = _search_curated_corpus(question)
         if question.source_policy == "official":
             for item in await search_verified_grants(question.query, settings, domains):
                 results.append(_source_from_result(item, "curated_or_live_grants", "official"))
             for item in await search_verified_resources(question.query, settings, domains):
                 results.append(_source_from_result(item, "curated_or_live_resources", "official"))
-        else:
-            exa = await exa_search_web(question.query, settings, domains, num_results=5)
-            tiny = await tinyfish_search_web(question.query, settings, domains)
-            for item in [*exa.get("results", []), *tiny.get("results", [])]:
-                results.append(_source_from_result(item, str(item.get("provider") or exa.get("provider") or tiny.get("provider")), question.source_policy))
+        results.extend(await _search_live_web(question, settings, domains))
         return _dedupe_sources(results)
 
 
@@ -339,9 +336,110 @@ def _domain(url: str) -> str:
 def _dedupe_sources(sources: list[ResearchSource]) -> list[ResearchSource]:
     deduped: dict[str, ResearchSource] = {}
     for source in sources:
-        key = source.url or source.title
+        key = f"{source.provider}:{source.url or source.title}"
         deduped.setdefault(key, source)
     return list(deduped.values())
+
+
+async def _search_live_web(question: ResearchQuestion, settings: Settings, domains: list[str]) -> list[ResearchSource]:
+    sources: list[ResearchSource] = []
+    exa = await exa_search_web(question.query, settings, domains, num_results=5)
+    tiny = await tinyfish_search_web(question.query, settings, domains)
+    for item in exa.get("results", []):
+        sources.append(_source_from_result(item, str(item.get("provider") or exa.get("provider") or "exa"), question.source_policy))
+    for item in tiny.get("results", []):
+        sources.append(_source_from_result(item, str(item.get("provider") or tiny.get("provider") or "tinyfish_search"), question.source_policy))
+    return sources
+
+
+def _search_curated_corpus(question: ResearchQuestion, limit: int = 5) -> list[ResearchSource]:
+    query_terms = _search_terms(question.query)
+    if not query_terms:
+        return []
+
+    scored: list[tuple[int, dict[str, Any]]] = []
+    for entry in singapore_support_corpus():
+        tier = str(entry.get("source_tier") or "official")
+        if question.source_policy == "official" and tier != "official":
+            continue
+        if question.source_policy == "high_trust" and tier not in {"official", "high_trust"}:
+            continue
+        text = _corpus_search_text(entry)
+        score = sum(4 for topic in entry.get("topics", []) if any(term in str(topic).lower() for term in query_terms))
+        score += sum(1 for term in query_terms if term in text)
+        if score:
+            scored.append((score, entry))
+
+    scored.sort(key=lambda item: (-item[0], str(item[1].get("title") or "")))
+    return [_source_from_corpus_entry(entry, question.source_policy) for _, entry in scored[:limit]]
+
+
+def _source_from_corpus_entry(entry: dict[str, Any], requested_tier: SourceTier) -> ResearchSource:
+    url = str(entry.get("url") or "")
+    tier = _source_tier(url, requested_tier)
+    if entry.get("source_tier") in {"official", "high_trust", "informal"}:
+        tier = entry["source_tier"]
+    claims = entry.get("claims") if isinstance(entry.get("claims"), list) else []
+    snippet = str(entry.get("summary") or "")
+    if claims:
+        snippet = f"{snippet} {' '.join(str(claim) for claim in claims[:2])}".strip()
+    return ResearchSource(
+        title=str(entry.get("title") or "Curated corpus source"),
+        url=url or None,
+        snippet=snippet,
+        source_tier=tier,
+        claim_status=_claim_status(tier, {"verification_status": "safe_to_show"}),
+        verification_status="safe_to_show",
+        retrieved_at=str(entry.get("retrieved_at") or datetime.now(UTC).date().isoformat()),
+        provider="curated_corpus",
+    )
+
+
+def _search_terms(query: str) -> set[str]:
+    stopwords = {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "available",
+        "be",
+        "care",
+        "for",
+        "from",
+        "in",
+        "is",
+        "of",
+        "official",
+        "or",
+        "singapore",
+        "source",
+        "support",
+        "the",
+        "to",
+        "what",
+        "with",
+    }
+    return {term for term in re_split_words(query) if len(term) > 2 and term not in stopwords}
+
+
+def re_split_words(value: str) -> list[str]:
+    import re
+
+    return re.findall(r"[a-z0-9]+", value.lower())
+
+
+def _corpus_search_text(entry: dict[str, Any]) -> str:
+    parts = [
+        entry.get("id", ""),
+        entry.get("title", ""),
+        entry.get("source", ""),
+        entry.get("summary", ""),
+        " ".join(str(item) for item in entry.get("topics", [])),
+        " ".join(str(item) for item in entry.get("claims", [])),
+    ]
+    return " ".join(str(part).lower() for part in parts)
 
 
 def _claim_from_source(source: ResearchSource) -> str:

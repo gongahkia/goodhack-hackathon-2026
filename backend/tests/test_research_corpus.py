@@ -1,0 +1,155 @@
+import json
+from pathlib import Path
+
+import pytest
+
+import app.research as research
+from app.config import Settings
+from app.data import grants_database, singapore_support_corpus
+from app.research import DefaultResearchToolAdapter, ResearchQuestion, run_guarded_research_pipeline
+from app.store import MemoryGraphStore
+
+
+def test_singapore_support_corpus_has_required_source_metadata():
+    corpus = singapore_support_corpus()
+
+    assert len(corpus) >= 10
+    for entry in corpus:
+        assert entry["id"]
+        assert entry["title"]
+        assert entry["url"].startswith("https://")
+        assert entry["source_tier"] in {"official", "high_trust", "informal"}
+        assert entry["topics"]
+        assert entry["summary"]
+        assert entry["claims"]
+        assert entry["retrieved_at"]
+
+
+def test_expanded_grant_catalog_contains_long_term_care_and_training_schemes():
+    ids = {grant["id"] for grant in grants_database()}
+
+    assert {
+        "caregivers_training_grant",
+        "elderfund",
+        "idape",
+        "aic_seniors_mobility_enabling_fund",
+        "home_caregiving_grant",
+    } <= ids
+
+
+@pytest.mark.asyncio
+async def test_research_adapter_uses_curated_corpus_before_live_tools_without_api_keys():
+    adapter = DefaultResearchToolAdapter()
+    question = ResearchQuestion(
+        query="wheelchair mobility grant Singapore official subsidy eligibility",
+        source_policy="official",
+        rationale="Verify official support schemes.",
+        tools=["curated_corpus"],
+    )
+
+    results = await adapter.search(question, Settings(exa_api_key=None, tinyfish_api_key=None))
+
+    assert results
+    assert results[0].provider == "curated_corpus"
+    assert results[0].source_tier == "official"
+    assert results[0].claim_status == "verified_fact"
+    assert any("Seniors' Mobility and Enabling Fund" in result.title for result in results)
+
+
+@pytest.mark.asyncio
+async def test_research_adapter_keeps_local_corpus_and_live_web_results(monkeypatch):
+    async def fake_search_verified_grants(query, settings, allowlist=None):
+        return []
+
+    async def fake_search_verified_resources(query, settings, allowlist=None):
+        return []
+
+    async def fake_exa_search_web(query, settings, allowlist=None, num_results=5, search_type="auto"):
+        return {
+            "provider": "exa",
+            "configured": True,
+            "results": [
+                {
+                    "title": "Live AIC mobility search result",
+                    "url": "https://www.aic.sg/financial-assistance/seniors-mobility-enabling-fund-smf/",
+                    "snippet": "Live search confirms AIC SMF is relevant to mobility aids.",
+                    "verification_status": "safe_to_show",
+                    "provider": "exa",
+                }
+            ],
+        }
+
+    async def fake_tinyfish_search_web(query, settings, allowlist=None):
+        return {
+            "provider": "tinyfish_search",
+            "configured": True,
+            "results": [
+                {
+                    "title": "Live SG Enable assistive technology result",
+                    "url": "https://www.sgenable.sg/your-first-stop/disability-support/assistive-technology/assistive-technology-fund",
+                    "snippet": "Live search finds SG Enable assistive technology support.",
+                    "verification_status": "safe_to_show",
+                    "provider": "tinyfish_search",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(research, "search_verified_grants", fake_search_verified_grants)
+    monkeypatch.setattr(research, "search_verified_resources", fake_search_verified_resources)
+    monkeypatch.setattr(research, "exa_search_web", fake_exa_search_web)
+    monkeypatch.setattr(research, "tinyfish_search_web", fake_tinyfish_search_web)
+
+    adapter = DefaultResearchToolAdapter()
+    question = ResearchQuestion(
+        query="wheelchair mobility grant Singapore official subsidy eligibility",
+        source_policy="official",
+        rationale="Verify official support schemes.",
+        tools=["curated_corpus", "exa", "tinyfish"],
+    )
+
+    results = await adapter.search(question, Settings(exa_api_key="fake", tinyfish_api_key="fake"))
+    providers = [result.provider for result in results]
+
+    assert "curated_corpus" in providers
+    assert "exa" in providers
+    assert "tinyfish_search" in providers
+    assert any(result.url == "https://www.aic.sg/financial-assistance/seniors-mobility-enabling-fund-smf/" and result.provider == "curated_corpus" for result in results)
+    assert any(result.url == "https://www.aic.sg/financial-assistance/seniors-mobility-enabling-fund-smf/" and result.provider == "exa" for result in results)
+
+
+@pytest.mark.asyncio
+async def test_guarded_research_pipeline_persists_corpus_sources_as_evidence():
+    store = MemoryGraphStore()
+    task = await store.create_node(
+        "ad_hoc_research_task",
+        {
+            "patient_id": "patient-1",
+            "question": "What wheelchair grants are available in Singapore?",
+            "question_redacted": "What wheelchair grants are available in Singapore?",
+            "basis": "Doctor said wheelchair may be needed after mobility decline.",
+            "basis_redacted": "Doctor said wheelchair may be needed after mobility decline.",
+            "source_status": "pending_guardrail",
+            "requires_guardrail_review": True,
+        },
+        "agent",
+        status="pending_review",
+    )
+
+    result = await run_guarded_research_pipeline(store, task, Settings(exa_api_key=None, tinyfish_api_key=None))
+
+    sources = [
+        source
+        for node in result["research_results"]
+        for source in node["payload"]["sources"]
+    ]
+    assert any(source["provider"] == "curated_corpus" for source in sources)
+    assert any(source["claim_status"] == "verified_fact" for source in sources)
+    recommendation = result["synthesized_recommendation"]["payload"]
+    assert recommendation["evidence"]
+    assert recommendation["verified_facts"]
+
+
+def test_all_data_json_files_are_valid_and_nonempty():
+    for path in Path("data").glob("*.json"):
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+        assert parsed

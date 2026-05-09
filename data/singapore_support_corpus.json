@@ -1,0 +1,139 @@
+[
+  {
+    "id": "aic_smf_mobility_devices",
+    "title": "Seniors' Mobility and Enabling Fund",
+    "source": "Agency for Integrated Care",
+    "url": "https://www.aic.sg/financial-assistance/seniors-mobility-enabling-fund-smf/",
+    "source_tier": "official",
+    "topics": ["wheelchair", "mobility aid", "assistive device", "transport", "home healthcare item", "senior"],
+    "summary": "AIC scheme for eligible Singapore seniors needing mobility and assistive-device support, transport support, or home healthcare items.",
+    "claims": [
+      "Use SMF as an official source to check mobility aid, assistive device, transport, and home healthcare item support.",
+      "Eligibility should be verified on AIC before presenting any final subsidy amount or application decision."
+    ],
+    "retrieved_at": "2026-05-09"
+  },
+  {
+    "id": "aic_home_caregiving_grant",
+    "title": "Home Caregiving Grant",
+    "source": "Agency for Integrated Care",
+    "url": "https://www.aic.sg/financial-assistance/home-caregiving-grant/",
+    "source_tier": "official",
+    "topics": ["home caregiving", "caregiver", "moderate disability", "severe disability", "home care", "healthcare items"],
+    "summary": "AIC monthly cash payout scheme for eligible families caring for persons with moderate to severe disabilities at home.",
+    "claims": [
+      "HCG can be checked when a transcript indicates ongoing home caregiving expenses or disability-related care needs.",
+      "The user's eligibility and payout tier must be verified against AIC's current page."
+    ],
+    "retrieved_at": "2026-05-09"
+  },
+  {
+    "id": "aic_caregivers_training_grant",
+    "title": "Caregivers Training Grant",
+    "source": "Agency for Integrated Care",
+    "url": "https://www.aic.sg/financial-assistance/caregivers-training-grant-ctg/",
+    "source_tier": "official",
+    "topics": ["caregiver training", "caregiving skills", "functional assessment", "domestic helper", "course"],
+    "summary": "AIC grant that subsidises approved caregiver training courses for eligible care recipients and caregivers.",
+    "claims": [
+      "CTG is relevant when the transcript implies the caregiver needs training for mobility, daily living, dementia, or home-care tasks.",
+      "Only approved courses and current AIC rules should be treated as verified eligibility facts."
+    ],
+    "retrieved_at": "2026-05-09"
+  },
+  {
+    "id": "aic_elderfund",
+    "title": "ElderFund",
+    "source": "Agency for Integrated Care",
+    "url": "https://www.aic.sg/financial-assistance/elderfund/",
+    "source_tier": "official",
+    "topics": ["elderfund", "severe disability", "long term care", "low income", "activities of daily living"],
+    "summary": "AIC discretionary assistance scheme for lower-income Singapore Citizens with severe disability and long-term care needs.",
+    "claims": [
+      "ElderFund should be considered only as an official lead when severe disability and long-term care cost concerns are present.",
+      "Means-test, disability assessment, and interaction with other long-term care schemes must be verified on AIC."
+    ],
+    "retrieved_at": "2026-05-09"
+  },
+  {
+    "id": "aic_idape",
+    "title": "Interim Disability Assistance Programme for the Elderly",
+    "source": "Agency for Integrated Care",
+    "url": "https://www.aic.sg/financial-assistance/interim-disability-assistance-programme-for-the-elderly/",
+    "source_tier": "official",
+    "topics": ["idape", "severe disability", "elderly", "long term care", "activities of daily living"],
+    "summary": "AIC disability assistance scheme for older Singaporeans with severe disabilities who may need help with care costs.",
+    "claims": [
+      "IDAPE can be surfaced as an official scheme lead for older care recipients with severe disability language in the transcript.",
+      "Eligibility and interaction with ElderFund, ElderShield, or CareShield Life must be checked on current AIC pages."
+    ],
+    "retrieved_at": "2026-05-09"
+  },
+  {
+    "id": "aic_careshield_eldershield",
+    "title": "CareShield Life / ElderShield",
+    "source": "Agency for Integrated Care",
+    "url": "https://www.aic.sg/financial-assistance/careshield-life-eldershield/",
+    "source_tier": "official",
+    "topics": ["careshield", "eldershield", "severe disability", "long term care insurance", "activities of daily living"],
+    "summary": "Long-term care insurance schemes that may provide payouts for eligible people with severe disability.",
+    "claims": [
+      "CareShield Life and ElderShield are relevant when transcripts mention severe disability or inability to perform activities of daily living.",
+      "The agent must not claim eligibility without current scheme membership and disability assessment details."
+    ],
+    "retrieved_at": "2026-05-09"
+  },
+  {
+    "id": "sg_enable_assistive_technology_fund",
+    "title": "Assistive Technology Fund",
+    "source": "SG Enable",
+    "url": "https://www.sgenable.sg/your-first-stop/disability-support/assistive-technology/assistive-technology-fund",
+    "source_tier": "official",
+    "topics": ["assistive technology", "disability", "mobility", "wheelchair", "device", "equipment"],
+    "summary": "SG Enable scheme for assistive technology support for eligible persons with disabilities.",
+    "claims": [
+      "ATF is relevant for disability-related assistive technology or device needs.",
+      "Final eligibility and subsidy details must be verified with SG Enable."
+    ],
+    "retrieved_at": "2026-05-09"
+  },
+  {
+    "id": "healthhub_fall_prevention",
+    "title": "7 Fall Prevention Tips for Seniors and Caregivers",
+    "source": "HealthHub",
+    "url": "https://www.healthhub.sg/live-healthy/tips-on-fall-prevention",
+    "source_tier": "official",
+    "topics": ["falls", "fall prevention", "home safety", "mobility", "caregiver", "senior"],
+    "summary": "HealthHub caregiver-facing fall prevention and home-safety information for seniors.",
+    "claims": [
+      "Use this as a health-education source for fall prevention and home safety, not as a grant eligibility source."
+    ],
+    "retrieved_at": "2026-05-09"
+  },
+  {
+    "id": "healthhub_dementia_caregiver",
+    "title": "MindSG: Managing Dementia As A Caregiver",
+    "source": "HealthHub",
+    "url": "https://www.healthhub.sg/programmes/mindsg/caring-for-others/my-elderly-parent-managing-dementia",
+    "source_tier": "official",
+    "topics": ["dementia", "caregiver", "elderly parent", "routine", "support"],
+    "summary": "HealthHub MindSG caregiver information for supporting elderly parents with dementia.",
+    "claims": [
+      "Use this as an official education source when dementia caregiving support is relevant."
+    ],
+    "retrieved_at": "2026-05-09"
+  },
+  {
+    "id": "aic_care_options",
+    "title": "Knowing Available Care Options",
+    "source": "Agency for Integrated Care",
+    "url": "https://www.aic.sg/caregiving/knowing-available-care-options/",
+    "source_tier": "official",
+    "topics": ["care options", "home care", "caregiver support", "respite", "financial grants", "care services"],
+    "summary": "AIC caregiver page covering available care options, care services, support groups, and financial grants.",
+    "claims": [
+      "This is a useful official navigational source when the task is broad care planning rather than a single grant."
+    ],
+    "retrieved_at": "2026-05-09"
+  }
+]

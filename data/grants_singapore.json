@@ -70,5 +70,32 @@
     "applicable_conditions": ["assistive technology", "mobility", "disability"],
     "eligibility_hints": ["person with disability", "means-tested", "assistive technology device"],
     "summary": "Subsidies for assistive technology devices for eligible persons with disabilities."
+  },
+  {
+    "id": "caregivers_training_grant",
+    "name": "Caregivers Training Grant",
+    "agency": "Agency for Integrated Care",
+    "url": "https://www.aic.sg/financial-assistance/caregivers-training-grant-ctg/",
+    "applicable_conditions": ["caregiver training", "mobility", "dementia", "disability", "activities of daily living"],
+    "eligibility_hints": ["care recipient is Singapore Citizen or PR", "aged 65 and older or has disability", "main caregiver completes approved training"],
+    "summary": "Subsidises approved courses for caregivers to learn skills to better care for their loved ones."
+  },
+  {
+    "id": "elderfund",
+    "name": "ElderFund",
+    "agency": "Agency for Integrated Care",
+    "url": "https://www.aic.sg/financial-assistance/elderfund/",
+    "applicable_conditions": ["severe disability", "long term care", "activities of daily living", "low income"],
+    "eligibility_hints": ["Singapore Citizen aged 30 and above", "requires full assistance with at least three activities of daily living", "means-tested"],
+    "summary": "Discretionary monthly cash support for lower-income Singapore Citizens with severe disability and long-term care needs."
+  },
+  {
+    "id": "idape",
+    "name": "Interim Disability Assistance Programme for the Elderly",
+    "agency": "Agency for Integrated Care",
+    "url": "https://www.aic.sg/financial-assistance/interim-disability-assistance-programme-for-the-elderly/",
+    "applicable_conditions": ["severe disability", "elderly", "long term care", "activities of daily living"],
+    "eligibility_hints": ["older Singaporeans with severe disability", "scheme eligibility must be verified with AIC"],
+    "summary": "Monthly cash assistance for eligible older Singaporeans with severe disabilities to help manage care costs."
   }
 ]

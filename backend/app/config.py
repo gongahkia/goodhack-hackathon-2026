@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     sealion_base_url: str = "https://api.sea-lion.ai/v1"
     sealion_model: str = "aisingapore/Gemma-SEA-LION-v4-27B-IT"
     sealion_guard_model: str = "aisingapore/SEA-Guard"
+    sealion_transcript_review_enabled: bool = False
     transcription_provider: str = "openai"
     openai_transcription_model: str = "gpt-4o-transcribe"
     local_transcription_backend: str = "auto"

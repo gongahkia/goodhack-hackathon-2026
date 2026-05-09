@@ -8,6 +8,7 @@ from app.store import MemoryGraphStore
 TRANSCRIPT_FIRST_NODE_TYPES = {
     "transcription_session",
     "transcript",
+    "transcript_review",
     "pii_redaction",
     "extracted_entities",
     "triage_decision",
@@ -27,6 +28,7 @@ TRANSCRIPT_FIRST_NODE_TYPES = {
 TRANSCRIPT_FIRST_EDGE_TYPES = {
     "transcribed_to",
     "redacted_as",
+    "reviewed_from",
     "extracted_from",
     "triaged_from",
     "classified_as",
@@ -70,6 +72,17 @@ async def test_memory_graph_store_accepts_transcript_first_nodes_and_edges():
             "placeholder_map": {"PERSON_1": "John"},
         },
         "system",
+        status="approved",
+    )
+    review = await store.create_node(
+        "transcript_review",
+        {
+            "patient_id": patient_id,
+            "pii_redaction_id": str(redaction.id),
+            "provider": "sealion",
+            "input_privacy": "direct_pii_redacted",
+        },
+        "agent",
         status="approved",
     )
     entities = await store.create_node(
@@ -146,6 +159,7 @@ async def test_memory_graph_store_accepts_transcript_first_nodes_and_edges():
 
     await store.create_edge(session.id, transcript.id, "transcribed_to")
     await store.create_edge(transcript.id, redaction.id, "redacted_as")
+    await store.create_edge(review.id, redaction.id, "reviewed_from")
     await store.create_edge(entities.id, redaction.id, "extracted_from")
     await store.create_edge(triage.id, entities.id, "triaged_from")
     await store.create_edge(daily_task.id, triage.id, "classified_as")

@@ -113,3 +113,47 @@ async def test_ingest_audio_transcription_persists_session_transcript_and_redact
     assert redaction.payload["redacted_text"] == "PERSON_1 needs Panadol before lunch."
     assert redaction.payload["placeholder_map"] == {"PERSON_1": "John"}
     assert any(edge.type == "redacted_as" and str(edge.from_node) == transcript_id and edge.to_node == redaction.id for edge in graph.edges)
+
+
+@pytest.mark.asyncio
+async def test_sealion_transcript_review_uses_redacted_text_and_persists_review(monkeypatch):
+    captured = {}
+
+    async def fake_sealion_regional_review(text, settings, task="caregiver_language_review", target_language="English", max_tokens=500):
+        captured["text"] = text
+        captured["task"] = task
+        captured["target_language"] = target_language
+        return {
+            "provider": "sealion",
+            "configured": True,
+            "model": settings.sealion_model,
+            "task": task,
+            "target_language": target_language,
+            "result": '{"issues":[],"locale_notes":["clear"],"confidence":0.9}',
+        }
+
+    monkeypatch.setattr("app.transcript_pipeline.sealion_regional_review", fake_sealion_regional_review)
+    store = MemoryGraphStore()
+    await store.init()
+    transcript = await store.create_node(
+        "transcript",
+        {"patient_id": "patient-1", "raw_text": "John needs Panadol before lunch."},
+        "system",
+        status="approved",
+    )
+
+    redaction = await redact_stored_transcript(
+        store,
+        transcript,
+        Settings(sealion_transcript_review_enabled=True, sealion_api_key="test-sealion"),
+    )
+
+    assert captured["text"] == "PERSON_1 needs Panadol before lunch."
+    assert "John" not in captured["text"]
+    assert captured["task"] == "redacted_transcript_care_reasoning_review"
+    reviews = await store.list_nodes("patient-1", ["transcript_review"])
+    assert len(reviews) == 1
+    assert reviews[0].payload["pii_redaction_id"] == str(redaction.id)
+    assert reviews[0].payload["input_privacy"] == "direct_pii_redacted"
+    assert reviews[0].payload["configured"] is True
+    assert any(edge.type == "reviewed_from" and edge.from_node == reviews[0].id and edge.to_node == redaction.id for edge in await store.list_edges())

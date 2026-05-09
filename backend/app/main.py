@@ -311,7 +311,7 @@ async def redact_transcript(transcript_id: UUID) -> dict:
     transcript = await store.get_node(transcript_id)
     if not transcript or transcript.type != "transcript":
         raise HTTPException(404, "Transcript not found")
-    redaction = await redact_stored_transcript(store, transcript)
+    redaction = await redact_stored_transcript(store, transcript, settings)
     return redaction.model_dump(mode="json")
 
 
@@ -351,7 +351,7 @@ async def _redaction_for_transcript(transcript: Node):
             redaction = await store.get_node(edge.to_node)
             if redaction and redaction.type == "pii_redaction":
                 return redaction
-    return await redact_stored_transcript(store, transcript)
+    return await redact_stored_transcript(store, transcript, settings)
 
 
 @app.get("/resources/search")

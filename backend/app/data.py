@@ -25,3 +25,8 @@ def grants_database() -> list[dict[str, Any]]:
 @lru_cache
 def educational_resources() -> list[dict[str, Any]]:
     return _read_json("educational_resources.json")
+
+
+@lru_cache
+def singapore_support_corpus() -> list[dict[str, Any]]:
+    return _read_json("singapore_support_corpus.json")

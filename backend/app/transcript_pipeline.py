@@ -7,7 +7,8 @@ from .config import Settings
 from .models import Node
 from .privacy import redact_transcript_direct_pii
 from .store import GraphStore
-from .transcription import TranscriptionError, transcribe_audio
+from .transcription import TranscriptionError, TranscriptionInputError, transcribe_audio
+from .v2 import sealion_regional_review
 
 
 async def ingest_audio_transcription(
@@ -17,6 +18,11 @@ async def ingest_audio_transcription(
     content_type: str | None,
     settings: Settings,
 ) -> dict[str, Any]:
+    if not audio:
+        raise TranscriptionInputError("No audio was received.")
+    if len(audio) > settings.transcription_max_bytes:
+        raise TranscriptionInputError(f"Audio is too large. Max size is {settings.transcription_max_bytes // (1024 * 1024)} MB.")
+
     log = await store.create_reasoning_log("audio_transcription")
     requested_at = datetime.now(UTC).isoformat()
     session = await store.create_node(
@@ -123,6 +129,7 @@ async def ingest_audio_transcription(
 async def redact_stored_transcript(
     store: GraphStore,
     transcript: Node,
+    settings: Settings | None = None,
     known_people: list[str] | None = None,
 ) -> Node:
     if transcript.type != "transcript":
@@ -153,6 +160,59 @@ async def redact_stored_transcript(
                 "transcript_id": str(transcript.id),
                 "pii_redaction_id": str(node.id),
                 **redaction["privacy"],
+            },
+        )
+    await maybe_review_redacted_transcript_with_sealion(store, node, settings)
+    return node
+
+
+async def maybe_review_redacted_transcript_with_sealion(
+    store: GraphStore,
+    redaction: Node,
+    settings: Settings | None,
+) -> Node | None:
+    if not settings or not settings.sealion_transcript_review_enabled:
+        return None
+    patient_id = str(redaction.payload.get("patient_id") or "")
+    redacted_text = str(redaction.payload.get("redacted_text") or "")
+    review = await sealion_regional_review(
+        redacted_text,
+        settings,
+        task="redacted_transcript_care_reasoning_review",
+        target_language="English",
+        max_tokens=700,
+    )
+    node = await store.create_node(
+        "transcript_review",
+        {
+            "patient_id": patient_id,
+            "pii_redaction_id": str(redaction.id),
+            "provider": review.get("provider"),
+            "configured": review.get("configured"),
+            "model": review.get("model"),
+            "task": review.get("task") or "redacted_transcript_care_reasoning_review",
+            "result": review.get("result"),
+            "error": review.get("error"),
+            "input_privacy": "direct_pii_redacted",
+            "redacted_input_chars": len(redacted_text),
+            "created_at": datetime.now(UTC).isoformat(),
+        },
+        "agent",
+        reasoning_log_id=redaction.reasoning_log_id,
+        status="approved" if review.get("result") else "clarification_required",
+    )
+    await store.create_edge(node.id, redaction.id, "reviewed_from")
+    if redaction.reasoning_log_id:
+        await store.append_reasoning_step(
+            redaction.reasoning_log_id,
+            {
+                "kind": "sealion_transcript_review",
+                "pii_redaction_id": str(redaction.id),
+                "transcript_review_id": str(node.id),
+                "configured": review.get("configured"),
+                "provider": review.get("provider"),
+                "model": review.get("model"),
+                "input_privacy": "direct_pii_redacted",
             },
         )
     return node

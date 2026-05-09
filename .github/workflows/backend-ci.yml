@@ -1,0 +1,63 @@
+name: Backend CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        shell: bash
+
+    env:
+      TINYFISH_API_KEY: ""
+      SEALION_API_KEY: ""
+      EXA_API_KEY: ""
+      OPENAI_API_KEY: ""
+      DATABASE_URL: ""
+      LEGACY_DEMO_ENABLED: "false"
+      SCHEDULED_REVIEW_ENABLED: "false"
+      RUN_LIVE_OPENAI_TESTS: "0"
+      RUN_LIVE_TINYFISH_TESTS: "0"
+      RUN_POSTGRES_INTEGRATION_TESTS: "0"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements.txt
+
+      - name: Validate JSON data corpus
+        run: |
+          python -m json.tool data/grants_singapore.json >/dev/null
+          python -m json.tool data/educational_resources.json >/dev/null
+          python -m json.tool data/condition_trajectories.json >/dev/null
+          python -m json.tool data/singapore_support_corpus.json >/dev/null
+
+      - name: Run backend tests
+        run: |
+          python -m pytest backend/tests

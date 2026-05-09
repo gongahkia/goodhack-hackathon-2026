@@ -1,4 +1,5 @@
 import asyncio
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
@@ -241,3 +242,123 @@ def test_notifications_surface_daily_tasks_calendar_failures_and_dismissal_feedb
     dismissed = [item for item in after.json() if item["source_node_id"] == str(task.id)]
     assert dismissed
     assert dismissed[0]["kind"] == "dismissed"
+
+
+def test_long_transcript_route_creates_daily_appointment_and_research_without_duplicate_artifacts(monkeypatch):
+    store = _install_test_app(monkeypatch)
+    long_context = " ".join(
+        [
+            "The caregiver gave detailed context about mobility, diabetes, home routines, transport, and family availability."
+            for _ in range(40)
+        ]
+    )
+    transcript_text = (
+        f"{long_context} "
+        "John needs Panadol before lunch every day. "
+        "John has a physio appointment on June 1, 2026 at 10am. "
+        "Doctor said if high blood sugar continues John may need amputation and wheelchair support, find Singapore wheelchair grants."
+    )
+
+    async def seed_transcript():
+        return await store.create_node(
+            "transcript",
+            {"patient_id": "mdm-tan", "raw_text": transcript_text},
+            "system",
+            status="approved",
+        )
+
+    transcript = asyncio.run(seed_transcript())
+
+    with TestClient(main.app) as client:
+        first = client.post(f"/transcripts/{transcript.id}/process", headers=_headers())
+        second = client.post(f"/transcripts/{transcript.id}/process", headers=_headers())
+        research_tasks = client.get("/research/tasks")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json() == second.json()
+    body = first.json()
+    assert len(body["daily_tasks"]) == 1
+    assert len(body["appointment_candidates"]) == 1
+    assert len(body["ad_hoc_research_tasks"]) == 1
+    appointment = body["appointment_candidates"][0]["payload"]
+    assert appointment["kind"] == "physio"
+    assert appointment["date"] == "2026-06-01"
+    assert appointment["requires_calendar_write"] is True
+    research = body["ad_hoc_research_tasks"][0]["payload"]
+    assert "John" in research["basis"]
+    assert "PERSON_" not in research["basis"]
+    assert "PERSON_" in research["basis_redacted"]
+    assert research_tasks.status_code == 200
+    assert research_tasks.json()[0]["id"] == body["ad_hoc_research_tasks"][0]["id"]
+    assert len(asyncio.run(store.list_nodes("mdm-tan", ["daily_task"]))) == 1
+    assert len(asyncio.run(store.list_nodes("mdm-tan", ["appointment_candidate"]))) == 1
+    assert len(asyncio.run(store.list_nodes("mdm-tan", ["ad_hoc_research_task"]))) == 1
+
+
+def test_negative_api_contracts_for_missing_or_wrong_node_types(monkeypatch):
+    store = _install_test_app(monkeypatch)
+
+    async def seed_nodes():
+        daily = await store.create_node(
+            "daily_task",
+            {"patient_id": "mdm-tan", "title": "Task", "description": "Task", "scheduling_semantics": "fixed_clinical"},
+            "agent",
+        )
+        transcript = await store.create_node(
+            "transcript",
+            {"patient_id": "mdm-tan", "raw_text": "John needs Panadol before lunch daily."},
+            "system",
+        )
+        return daily, transcript
+
+    daily, transcript = asyncio.run(seed_nodes())
+    missing_id = uuid4()
+
+    with TestClient(main.app) as client:
+        missing_session = client.post(f"/transcriptions/{missing_id}/process", headers=_headers())
+        wrong_redact_type = client.post(f"/transcripts/{daily.id}/redact", headers=_headers())
+        wrong_research_type = client.post(f"/research/tasks/{daily.id}/run", headers=_headers())
+        wrong_appointment_type = client.post(f"/appointments/{transcript.id}/approve-calendar-write", headers=_headers())
+        malformed_daily_patch = client.patch(
+            f"/tasks/daily/{daily.id}",
+            headers=_headers(),
+            json={"scheduled_time": "11:00:30"},
+        )
+        unsupported_daily_patch = client.patch(
+            f"/tasks/daily/{daily.id}",
+            headers=_headers(),
+            json={"delete_everything": True},
+        )
+
+    assert missing_session.status_code == 404
+    assert wrong_redact_type.status_code == 404
+    assert wrong_research_type.status_code == 404
+    assert wrong_appointment_type.status_code == 404
+    assert malformed_daily_patch.status_code == 422
+    assert "scheduled_time must use HH:MM format" in malformed_daily_patch.json()["detail"]
+    assert unsupported_daily_patch.status_code == 422
+    assert "Unsupported daily task field" in unsupported_daily_patch.json()["detail"]
+
+
+def test_transcription_route_rejects_empty_audio_before_provider_call(monkeypatch):
+    _install_test_app(monkeypatch)
+    called = False
+
+    async def fake_transcribe_audio(audio, content_type, settings):
+        nonlocal called
+        called = True
+        return TranscriptionResult(text="should not happen", provider="openai", model="gpt-4o-transcribe")
+
+    monkeypatch.setattr(transcript_pipeline, "transcribe_audio", fake_transcribe_audio)
+
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/transcriptions",
+            content=b"",
+            headers={**_headers(), "Content-Type": "audio/wav"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "No audio was received."
+    assert called is False

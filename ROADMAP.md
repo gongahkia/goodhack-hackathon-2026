@@ -102,7 +102,7 @@ User review/edit        User-facing recommendation schema
 
 ## Transcription Service
 
-The backend receives raw audio from the frontend and calls:
+The backend receives raw audio from an API client and calls:
 
 ```text
 POST https://api.openai.com/v1/audio/transcriptions
@@ -398,7 +398,7 @@ research result bundle
 synthesis model
         |
         v
-frontend-ready recommendation schema
+client-ready recommendation schema
 ```
 
 Research planner:
@@ -652,7 +652,7 @@ Phase 6: implement guarded research pipeline.
 - guardrail auditor model
 - TinyFish/Exa adapters with allowlist policy
 - source freshness and citation capture
-- synthesis model with strict frontend schema
+- synthesis model with strict client schema
 
 Phase 7: implement approval workflows.
 
@@ -708,3 +708,11 @@ Production quality metrics:
 - 2026-05-09: Implemented Phase 5 daily scheduler with next-day-only Google Calendar read adapter, fixed/movable conflict classification, three-times-daily medication spacing checks, persisted schedule conflict nodes, notification candidates, and polling-friendly notification output.
 - 2026-05-09: Implemented Phase 6 guarded research pipeline with redacted research planning, guardrail approval/blocking, TinyFish/Exa-capable source-tier adapters, citation freshness capture, strict synthesized recommendation schema, and recommendation polling.
 - 2026-05-09: Implemented Phase 7 approval workflows with daily task edit overrides, caregiver feedback nodes, explicit appointment approval before Google Calendar insert, and audited calendar write success/failure states.
+- 2026-05-09: Hardened backend API coverage with route-level contract tests, idempotent transcript processing, transcript-first notifications, and manual verification documentation.
+- 2026-05-09: Removed the existing frontend codebase so the repository direction is backend-only.
+- 2026-05-09: Expanded Singapore support data into a source-attributed local research corpus and wired it into guarded research before live tools.
+- 2026-05-09: Added backend CI workflow, corpus metadata tests, JSON validation, and deterministic no-network CI conventions.
+- 2026-05-09: Updated research retrieval to preserve both local corpus evidence and live Exa/TinyFish web-search evidence instead of treating either source as sufficient alone.
+- 2026-05-09: Expanded API contract tests for long transcripts, missing/wrong node targets, malformed daily task edits, unsupported fields, and empty audio rejection before provider dispatch.
+- 2026-05-09: Added optional SEA-LION transcript review over direct-PII-redacted transcripts, persisted as `transcript_review` nodes with `reviewed_from` provenance.
+- 2026-05-09: Added opt-in live integration tests for OpenAI transcription, TinyFish search, and Postgres graph-store/schema roundtrip while keeping default CI no-network.
