@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     faster_whisper_compute_type: str = "int8"
     groq_api_key: str | None = None
     groq_transcription_model: str = "whisper-large-v3-turbo"
-    transcription_language: str = "en"
+    transcription_language: str | None = None
     transcription_max_bytes: int = 25 * 1024 * 1024
     transcription_timeout_seconds: int = 120
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"

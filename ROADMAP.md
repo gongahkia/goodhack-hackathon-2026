@@ -716,3 +716,4 @@ Production quality metrics:
 - 2026-05-09: Expanded API contract tests for long transcripts, missing/wrong node targets, malformed daily task edits, unsupported fields, and empty audio rejection before provider dispatch.
 - 2026-05-09: Added optional SEA-LION transcript review over direct-PII-redacted transcripts, persisted as `transcript_review` nodes with `reviewed_from` provenance.
 - 2026-05-09: Added opt-in live integration tests for OpenAI transcription, TinyFish search, and Postgres graph-store/schema roundtrip while keeping default CI no-network.
+- 2026-05-09: Added safe context-engineering learning harness with model evaluation records, feedback/memory context, prompt candidates requiring human review, and explicit no dataset export/no RLHF/RLAIF/no autonomous self-editing/no auto-deployment boundaries.

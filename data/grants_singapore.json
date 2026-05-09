@@ -12,7 +12,7 @@
     "id": "pioneer_generation_package",
     "name": "Pioneer Generation Package",
     "agency": "Ministry of Health",
-    "url": "https://www.moh.gov.sg/cost-financing/healthcare-schemes-subsidies/pioneer-generation-package",
+    "url": "https://www.moh.gov.sg/managing-expenses/schemes-and-subsidies/pioneer-generation-package",
     "applicable_conditions": ["chronic disease", "senior", "medication"],
     "eligibility_hints": ["Pioneer Generation", "Singapore Citizen"],
     "summary": "Healthcare subsidies and MediSave top-ups for eligible Pioneer Generation seniors."
@@ -21,27 +21,27 @@
     "id": "merdeka_generation_package",
     "name": "Merdeka Generation Package",
     "agency": "Ministry of Health",
-    "url": "https://www.moh.gov.sg/cost-financing/healthcare-schemes-subsidies/merdeka-generation-package",
+    "url": "https://www.moh.gov.sg/managing-expenses/schemes-and-subsidies/merdeka-generation-package/",
     "applicable_conditions": ["chronic disease", "senior", "medication"],
     "eligibility_hints": ["Merdeka Generation", "Singapore Citizen"],
     "summary": "Outpatient care subsidies, MediSave top-ups, and related support for eligible Merdeka Generation seniors."
   },
   {
     "id": "medisave_chronic_disease_management",
-    "name": "MediSave for Chronic Disease Management Programme",
+    "name": "MediSave500/700 for Chronic Disease Management Programme",
     "agency": "Ministry of Health",
-    "url": "https://www.moh.gov.sg/cost-financing/healthcare-schemes-subsidies/medisave",
-    "applicable_conditions": ["hypertension", "diabetes", "copd", "chronic disease"],
-    "eligibility_hints": ["approved chronic conditions", "outpatient treatment"],
-    "summary": "Allows MediSave use for selected outpatient chronic disease treatments."
+    "url": "https://www.moh.gov.sg/managing-expenses/schemes-and-subsidies/medisave/outpatient-care/",
+    "applicable_conditions": ["hypertension", "diabetes", "copd", "stroke", "dementia", "parkinson", "chronic disease"],
+    "eligibility_hints": ["approved CDMP condition", "MediSave-accredited provider", "outpatient treatment"],
+    "summary": "Allows MediSave use for outpatient treatment of approved chronic conditions under CDMP, subject to current withdrawal limits."
   },
   {
     "id": "chas",
     "name": "Community Health Assist Scheme",
     "agency": "Ministry of Health",
-    "url": "https://www.chas.sg/",
-    "applicable_conditions": ["chronic disease", "hypertension", "copd", "dementia"],
-    "eligibility_hints": ["Singapore Citizen", "CHAS card", "participating GP or dental clinic"],
+    "url": "https://www.moh.gov.sg/managing-expenses/schemes-and-subsidies/chas/",
+    "applicable_conditions": ["chronic disease", "hypertension", "copd", "dementia", "dental", "common illness"],
+    "eligibility_hints": ["Singapore Citizen", "CHAS, Pioneer Generation, or Merdeka Generation card", "participating GP or dental clinic"],
     "summary": "Subsidies for medical and dental care at participating clinics."
   },
   {
@@ -97,5 +97,59 @@
     "applicable_conditions": ["severe disability", "elderly", "long term care", "activities of daily living"],
     "eligibility_hints": ["older Singaporeans with severe disability", "scheme eligibility must be verified with AIC"],
     "summary": "Monthly cash assistance for eligible older Singaporeans with severe disabilities to help manage care costs."
+  },
+  {
+    "id": "medisave_care",
+    "name": "MediSave Care",
+    "agency": "Agency for Integrated Care",
+    "url": "https://www.aic.sg/financial-assistance/medisave-care/",
+    "applicable_conditions": ["severe disability", "long term care", "activities of daily living", "home care", "nursing home"],
+    "eligibility_hints": ["Singapore Citizen or PR aged 30 and above", "MediSave Account balance", "requires full assistance with at least three activities of daily living"],
+    "summary": "Monthly MediSave cash withdrawals for eligible severely disabled Singapore Citizens or PRs to help with long-term care costs."
+  },
+  {
+    "id": "medifund",
+    "name": "MediFund",
+    "agency": "Ministry of Health",
+    "url": "https://www.moh.gov.sg/managing-expenses/schemes-and-subsidies/medifund/",
+    "applicable_conditions": ["medical bills", "hospitalisation", "long term care", "financial hardship", "subsidised care"],
+    "eligibility_hints": ["Singapore Citizen", "subsidised patient", "difficulty paying after subsidies, insurance, and MediSave", "MediFund-approved institution"],
+    "summary": "Safety-net assistance for Singapore Citizens who face difficulty paying remaining medical bills after subsidies, insurance, and MediSave."
+  },
+  {
+    "id": "medishield_life",
+    "name": "MediShield Life",
+    "agency": "Ministry of Health",
+    "url": "https://www.moh.gov.sg/managing-expenses/schemes-and-subsidies/medishield-life/",
+    "applicable_conditions": ["hospitalisation", "surgery", "large medical bills", "dialysis", "cancer treatment"],
+    "eligibility_hints": ["Singapore Citizen or PR", "universal basic health insurance", "claim limits and co-payment apply"],
+    "summary": "Basic national health insurance for Singapore Citizens and PRs that helps pay for large hospital bills and selected costly outpatient treatments."
+  },
+  {
+    "id": "aic_enhanced_home_personal_care",
+    "name": "Enhanced Home Personal Care Subsidies",
+    "agency": "Agency for Integrated Care",
+    "url": "https://www.aic.sg/Care-Services/Enhanced-Home-Personal-Care",
+    "applicable_conditions": ["home care", "caregiver respite", "daily living", "falls monitoring", "medication support", "senior"],
+    "eligibility_hints": ["Singapore Citizen or PR for subsidies", "means-tested", "doctor, polyclinic, hospital, or AIC Link referral"],
+    "summary": "Means-tested subsidies may apply for eligible seniors using Enhanced Home Personal Care services for daily care support at home."
+  },
+  {
+    "id": "aic_home_therapy_subsidy",
+    "name": "Home Therapy Subsidies",
+    "agency": "Agency for Integrated Care",
+    "url": "https://www.aic.sg/Care-Services/Home-Therapy",
+    "applicable_conditions": ["stroke", "frailty", "rehabilitation", "physiotherapy", "occupational therapy", "speech therapy", "homebound"],
+    "eligibility_hints": ["Singapore Citizen or PR for subsidies", "means-tested", "frail and homebound senior", "doctor, polyclinic, hospital, or AIC Link referral"],
+    "summary": "Means-tested subsidies may apply for eligible seniors who need physiotherapy, occupational therapy, or speech therapy at home."
+  },
+  {
+    "id": "aic_day_care_subsidy",
+    "name": "Day Care and Dementia Day Care Subsidies",
+    "agency": "Agency for Integrated Care",
+    "url": "https://www.aic.sg/care-services/day-care",
+    "applicable_conditions": ["dementia", "caregiver respite", "supervision", "maintenance exercise", "day care", "senior"],
+    "eligibility_hints": ["Singapore Citizen or PR for subsidies", "means-tested", "care needs or supervision needs", "doctor, polyclinic, hospital, or AIC Link referral"],
+    "summary": "Means-tested subsidies may apply for eligible seniors attending day care or dementia day care services."
   }
 ]

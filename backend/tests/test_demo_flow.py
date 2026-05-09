@@ -666,7 +666,15 @@ async def test_v2_exa_and_tinyfish_are_first_class_agent_tools_without_keys():
 
     store = MemoryGraphStore()
     log = await store.create_reasoning_log("test")
-    settings = Settings(demo_agent_mode="scripted")
+    settings = Settings(
+        demo_agent_mode="scripted",
+        exa_api_key=None,
+        tinyfish_api_key=None,
+        jina_api_key=None,
+        openalex_api_key=None,
+        semantic_scholar_api_key=None,
+        sealion_api_key=None,
+    )
     toolbox = AgentToolbox(store, settings, PATIENT_ID, log.id)
     tool_names = {tool["name"] for tool in toolbox.tool_specs()}
 
@@ -694,7 +702,15 @@ async def test_v2_exa_and_tinyfish_are_first_class_agent_tools_without_keys():
 
 @pytest.mark.asyncio
 async def test_v2_provider_wrappers_fail_closed_when_unconfigured():
-    settings = Settings(demo_agent_mode="scripted")
+    settings = Settings(
+        demo_agent_mode="scripted",
+        exa_api_key=None,
+        tinyfish_api_key=None,
+        jina_api_key=None,
+        openalex_api_key=None,
+        semantic_scholar_api_key=None,
+        sealion_api_key=None,
+    )
 
     exa = await exa_search_web("MOH caregiver grants", settings)
     tiny_search = await tinyfish_search_web("MOH caregiver grants", settings)

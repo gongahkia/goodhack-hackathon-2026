@@ -23,6 +23,8 @@ TRANSCRIPT_FIRST_NODE_TYPES = {
     "appointment_candidate",
     "calendar_write_request",
     "user_decision",
+    "model_evaluation",
+    "prompt_candidate",
 }
 
 TRANSCRIPT_FIRST_EDGE_TYPES = {
@@ -43,6 +45,7 @@ TRANSCRIPT_FIRST_EDGE_TYPES = {
     "requires_approval",
     "approved_by_user",
     "written_to_calendar",
+    "candidate_from",
 }
 
 
@@ -156,6 +159,18 @@ async def test_memory_graph_store_accepts_transcript_first_nodes_and_edges():
         "user",
         status="approved",
     )
+    model_evaluation = await store.create_node(
+        "model_evaluation",
+        {"patient_id": patient_id, "component": "triage", "outcome": "pass"},
+        "agent",
+        status="pending_review",
+    )
+    prompt_candidate = await store.create_node(
+        "prompt_candidate",
+        {"patient_id": patient_id, "component": "triage", "deployment_status": "pending_human_review"},
+        "user",
+        status="pending_review",
+    )
 
     await store.create_edge(session.id, transcript.id, "transcribed_to")
     await store.create_edge(transcript.id, redaction.id, "redacted_as")
@@ -174,6 +189,8 @@ async def test_memory_graph_store_accepts_transcript_first_nodes_and_edges():
     await store.create_edge(calendar_request.id, appointment.id, "requires_approval")
     await store.create_edge(calendar_request.id, user_decision.id, "approved_by_user")
     await store.create_edge(calendar_request.id, appointment.id, "written_to_calendar")
+    await store.create_edge(model_evaluation.id, daily_task.id, "evaluates")
+    await store.create_edge(prompt_candidate.id, model_evaluation.id, "candidate_from")
 
     graph = await store.graph_subset(patient_id)
 

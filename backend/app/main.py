@@ -5,7 +5,7 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from .agent.loop import run_agent_for_trigger
@@ -15,14 +15,15 @@ from .demo import PATIENT, PATIENT_ID, ingest_trigger_records, seed_baseline
 from .eval import evaluate_care_plan
 from .extraction import process_redacted_transcript
 from .graph_queries import backtrace_sources, forward_actions
-from .models import CaregiverNoteCreate, ClarificationUpdate, HumanEvaluationCreate, Node, NodeEdit, StatusUpdate
+from .learning import build_learning_context, create_model_evaluation, create_prompt_candidate, list_model_evaluations, list_prompt_candidates
+from .models import CaregiverNoteCreate, ClarificationUpdate, HumanEvaluationCreate, ModelEvaluationCreate, Node, NodeEdit, PromptCandidateCreate, StatusUpdate
 from .notifications import build_notifications
 from .privacy import PiiRedactor, sanitize_audit_payload
 from .research import run_guarded_research_pipeline
 from .scheduler import run_next_day_schedule_check
 from .transcript_pipeline import ingest_audio_transcription, redact_stored_transcript
 from .store import GraphStore, MemoryGraphStore, PostgresGraphStore
-from .transcription import TranscriptionError, transcribe_audio
+from .transcription import TranscriptionError, TranscriptionInputError, normalize_transcription_language, transcribe_audio
 from .v2 import (
     build_appointment_prep,
     build_calendar_ics,
@@ -290,20 +291,33 @@ async def clarify_caregiver_intent(node_id: UUID, update: ClarificationUpdate) -
 
 
 @app.post("/transcribe", dependencies=[Depends(require_write_access)])
-async def transcribe(request: Request) -> dict:
+async def transcribe(request: Request, language: str | None = Query(default=None)) -> dict:
     try:
-        result = await transcribe_audio(await request.body(), request.headers.get("content-type"), settings)
+        request_settings = transcription_settings_for_language(language)
+        result = await transcribe_audio(await request.body(), request.headers.get("content-type"), request_settings)
         return result.model_dump()
+    except TranscriptionInputError as exc:
+        raise HTTPException(422 if "Unsupported transcription language" in str(exc) else exc.status_code, str(exc)) from exc
     except TranscriptionError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
 
 
 @app.post("/transcriptions", dependencies=[Depends(require_write_access)])
-async def create_transcription(request: Request) -> dict:
+async def create_transcription(request: Request, language: str | None = Query(default=None)) -> dict:
     try:
-        return await ingest_audio_transcription(store, PATIENT_ID, await request.body(), request.headers.get("content-type"), settings)
+        request_settings = transcription_settings_for_language(language)
+        return await ingest_audio_transcription(store, PATIENT_ID, await request.body(), request.headers.get("content-type"), request_settings)
+    except TranscriptionInputError as exc:
+        raise HTTPException(422 if "Unsupported transcription language" in str(exc) else exc.status_code, str(exc)) from exc
     except TranscriptionError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
+
+
+def transcription_settings_for_language(language: str | None):
+    if language is None:
+        return settings
+    normalized = normalize_transcription_language(language)
+    return settings.model_copy(update={"transcription_language": normalized})
 
 
 @app.post("/transcripts/{transcript_id}/redact", dependencies=[Depends(require_write_access)])
@@ -497,6 +511,33 @@ async def dev_redact(payload: dict) -> dict:
 @app.get("/eval/care-plan")
 async def care_plan_eval() -> dict:
     return evaluate_care_plan(await store.graph_subset(PATIENT_ID), await store.list_reasoning_logs())
+
+
+@app.get("/learning/context", dependencies=[Depends(require_clinician_access)])
+async def learning_context() -> dict:
+    return build_learning_context(await store.list_nodes(PATIENT_ID))
+
+
+@app.get("/learning/model-evaluations", dependencies=[Depends(require_clinician_access)])
+async def model_evaluations() -> list[dict]:
+    nodes = await store.list_nodes(PATIENT_ID, ["model_evaluation"])
+    return list_model_evaluations(nodes)
+
+
+@app.post("/learning/model-evaluations", dependencies=[Depends(require_clinician_access)])
+async def create_learning_model_evaluation(evaluation: ModelEvaluationCreate) -> dict:
+    return await create_model_evaluation(store, PATIENT_ID, evaluation)
+
+
+@app.get("/learning/prompt-candidates", dependencies=[Depends(require_clinician_access)])
+async def prompt_candidates() -> list[dict]:
+    nodes = await store.list_nodes(PATIENT_ID, ["prompt_candidate"])
+    return list_prompt_candidates(nodes)
+
+
+@app.post("/learning/prompt-candidates", dependencies=[Depends(require_clinician_access)])
+async def create_learning_prompt_candidate(candidate: PromptCandidateCreate) -> dict:
+    return await create_prompt_candidate(store, PATIENT_ID, candidate)
 
 
 @app.get("/eval/human", dependencies=[Depends(require_clinician_access)])

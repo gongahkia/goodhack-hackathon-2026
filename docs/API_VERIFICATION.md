@@ -204,3 +204,4 @@ The API contract tests cover:
 - appointment approval and audited calendar write failure
 - notification visibility for transcript-first graph nodes
 - research evidence merging, where local corpus evidence is kept alongside mocked live web-search evidence
+- learning context, model evaluation records, and prompt candidates that require human review

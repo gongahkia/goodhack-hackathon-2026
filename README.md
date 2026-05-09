@@ -21,6 +21,7 @@ backend/sql/schema.sql   Postgres schema for graph nodes, edges, logs, and state
 data/                    Curated fallback catalogs for grants, resources, and trajectories
 docs/API_VERIFICATION.md Manual curl verification and API test coverage
 docs/CI_CD.md            Backend CI workflow and testing conventions
+docs/LEARNING_HARNESS.md Context engineering, model evaluation, and prompt candidate workflow
 ROADMAP.md               Backend architecture and implementation phases
 ```
 
@@ -97,6 +98,12 @@ CI/CD notes:
 
 ```bash
 open docs/CI_CD.md
+```
+
+Learning harness notes:
+
+```bash
+open docs/LEARNING_HARNESS.md
 ```
 
 Health check:

@@ -135,5 +135,187 @@
       "This is a useful official navigational source when the task is broad care planning rather than a single grant."
     ],
     "retrieved_at": "2026-05-09"
+  },
+  {
+    "id": "aic_medisave_care",
+    "title": "MediSave Care",
+    "source": "Agency for Integrated Care",
+    "url": "https://www.aic.sg/financial-assistance/medisave-care/",
+    "source_tier": "official",
+    "topics": ["medisave care", "severe disability", "long term care", "activities of daily living", "home care", "nursing home"],
+    "summary": "AIC long-term care scheme that allows eligible severely disabled Singapore Citizens or PRs to make monthly cash withdrawals from MediSave.",
+    "claims": [
+      "MediSave Care is relevant when transcripts mention severe disability, long-term care costs, home care services, or nursing-home fees.",
+      "Eligibility depends on current AIC rules, MediSave balance, age, citizenship or PR status, and severe disability assessment."
+    ],
+    "retrieved_at": "2026-05-09"
+  },
+  {
+    "id": "moh_medifund",
+    "title": "MediFund",
+    "source": "Ministry of Health",
+    "url": "https://www.moh.gov.sg/managing-expenses/schemes-and-subsidies/medifund/",
+    "source_tier": "official",
+    "topics": ["medifund", "medical bills", "financial hardship", "hospital bills", "long term care", "subsidised patient"],
+    "summary": "MOH safety-net scheme for Singaporeans who face difficulty paying remaining healthcare bills after subsidies, insurance, and MediSave.",
+    "claims": [
+      "MediFund should be surfaced when care notes mention inability to pay medical, hospital, community hospital, or approved long-term care bills.",
+      "Applications are assessed by the relevant MediFund-approved institution and should be discussed with medical social workers."
+    ],
+    "retrieved_at": "2026-05-09"
+  },
+  {
+    "id": "moh_medishield_life",
+    "title": "MediShield Life",
+    "source": "Ministry of Health",
+    "url": "https://www.moh.gov.sg/managing-expenses/schemes-and-subsidies/medishield-life/",
+    "source_tier": "official",
+    "topics": ["medishield life", "hospitalisation", "surgery", "large medical bills", "insurance", "cancer", "dialysis"],
+    "summary": "MOH basic national health insurance scheme for Singapore Citizens and PRs that helps with large hospital bills and selected costly outpatient treatments.",
+    "claims": [
+      "MediShield Life is useful context for hospitalisation or major-bill questions, but exact claim limits and payable amounts must be verified on MOH.",
+      "Do not present MediShield Life as a cash grant; it is insurance with claim limits, deductibles, and co-payment rules."
+    ],
+    "retrieved_at": "2026-05-09"
+  },
+  {
+    "id": "moh_medisave_outpatient_cdmp",
+    "title": "MediSave Outpatient Care and CDMP",
+    "source": "Ministry of Health",
+    "url": "https://www.moh.gov.sg/managing-expenses/schemes-and-subsidies/medisave/outpatient-care/",
+    "source_tier": "official",
+    "topics": ["medisave", "cdmp", "chronic disease", "outpatient", "parkinson", "dementia", "stroke", "copd", "hypertension", "diabetes"],
+    "summary": "MOH page covering MediSave outpatient use, including MediSave500/700 support for CDMP chronic-condition treatment.",
+    "claims": [
+      "Use this when transcripts mention outpatient chronic-condition bills, CDMP conditions, medication follow-up, or GP clinic costs.",
+      "Current annual withdrawal limits and eligible conditions should be verified on MOH before giving final guidance."
+    ],
+    "retrieved_at": "2026-05-09"
+  },
+  {
+    "id": "moh_chas",
+    "title": "Community Health Assist Scheme",
+    "source": "Ministry of Health",
+    "url": "https://www.moh.gov.sg/managing-expenses/schemes-and-subsidies/chas/",
+    "source_tier": "official",
+    "topics": ["chas", "gp clinic", "dental", "chronic disease", "common illness", "pioneer generation", "merdeka generation"],
+    "summary": "MOH scheme that enables Singapore Citizens, including Pioneer and Merdeka Generation cardholders, to receive subsidies at participating GP and dental clinics.",
+    "claims": [
+      "CHAS is relevant for outpatient GP, dental, preventive, and chronic-care affordability questions.",
+      "Card tier, enrolled clinic status, Healthier SG status, and current subsidy caps must be verified."
+    ],
+    "retrieved_at": "2026-05-09"
+  },
+  {
+    "id": "aic_enhanced_home_personal_care",
+    "title": "Enhanced Home Personal Care",
+    "source": "Agency for Integrated Care",
+    "url": "https://www.aic.sg/Care-Services/Enhanced-Home-Personal-Care",
+    "source_tier": "official",
+    "topics": ["home personal care", "home care", "caregiver respite", "daily living", "falls monitoring", "medication reminders", "senior"],
+    "summary": "AIC home-care service that provides daily personal care, routine support, maintenance exercises, and respite options for seniors at home.",
+    "claims": [
+      "Enhanced Home Personal Care is relevant when transcripts mention caregiver burnout, daily-living help, falls monitoring, medication reminders, or short breaks.",
+      "Government subsidies require Singapore Citizen or PR status and are means-tested; referral route should be checked on AIC."
+    ],
+    "retrieved_at": "2026-05-09"
+  },
+  {
+    "id": "aic_home_therapy",
+    "title": "Home Therapy",
+    "source": "Agency for Integrated Care",
+    "url": "https://www.aic.sg/Care-Services/Home-Therapy",
+    "source_tier": "official",
+    "topics": ["home therapy", "rehabilitation", "physiotherapy", "occupational therapy", "speech therapy", "stroke", "frailty", "homebound"],
+    "summary": "AIC service for physiotherapy, occupational therapy, and speech therapy at home for frail or homebound seniors who need rehabilitation.",
+    "claims": [
+      "Home Therapy is relevant for post-stroke, mobility, swallowing, speech, and daily-living rehabilitation needs when clinic travel is difficult.",
+      "Subsidy eligibility and referral requirements should be verified on AIC."
+    ],
+    "retrieved_at": "2026-05-09"
+  },
+  {
+    "id": "aic_day_care",
+    "title": "Day Care",
+    "source": "Agency for Integrated Care",
+    "url": "https://www.aic.sg/care-services/day-care",
+    "source_tier": "official",
+    "topics": ["day care", "dementia day care", "caregiver respite", "supervision", "maintenance exercise", "senior", "transport"],
+    "summary": "AIC centre-based day care and dementia day care service for seniors who need supervision, activities, basic care, and caregiver respite.",
+    "claims": [
+      "Day Care is relevant when caregivers need daytime supervision, structured activities, dementia day care, or respite while working.",
+      "Subsidies are means-tested and eligibility should be verified with AIC or the care provider."
+    ],
+    "retrieved_at": "2026-05-09"
+  },
+  {
+    "id": "aic_home_based_respite_care",
+    "title": "Home-based Respite Care",
+    "source": "Agency for Integrated Care",
+    "url": "https://www.aic.sg/care-services/home-based-respite-care",
+    "source_tier": "official",
+    "topics": ["home based respite care", "palliative care", "caregiver respite", "compassionate discharge", "daily living", "home care"],
+    "summary": "AIC short-term respite service for caregivers managing loved ones receiving home palliative care or compassionate discharge support.",
+    "claims": [
+      "HBRC is relevant only for palliative-care or compassionate-discharge contexts and should not be generalized to all respite needs.",
+      "AIC notes that from 1 April 2026, people needing home-based respite care can apply for Enhanced Home Personal Care services."
+    ],
+    "retrieved_at": "2026-05-09"
+  },
+  {
+    "id": "sg_enable_disability_support",
+    "title": "Disability Support",
+    "source": "SG Enable",
+    "url": "https://www.sgenable.sg/your-first-stop/disability-support",
+    "source_tier": "official",
+    "topics": ["disability support", "enabling guide", "caregiver", "schemes", "services", "future care planning", "special needs trust"],
+    "summary": "SG Enable disability-support entry point for persons with disabilities, caregivers, and professionals to find schemes, services, and planning resources.",
+    "claims": [
+      "Use SG Enable Disability Support as an official navigation source for disability schemes, caregiver planning, and service options.",
+      "Specific scheme eligibility still needs verification on the relevant SG Enable or Enabling Guide page."
+    ],
+    "retrieved_at": "2026-05-09"
+  },
+  {
+    "id": "healthhub_stroke_physiotherapy",
+    "title": "Rehabilitation after Stroke: Physiotherapy",
+    "source": "HealthHub",
+    "url": "https://www.healthhub.sg/a-z/diseases-and-conditions/physiotherapy",
+    "source_tier": "official",
+    "topics": ["stroke", "physiotherapy", "rehabilitation", "mobility", "walking aid", "caregiver"],
+    "summary": "HealthHub stroke physiotherapy education source for mobility, balance, walking aids, and rehabilitation after stroke.",
+    "claims": [
+      "Use this as official education context when post-stroke mobility or rehabilitation needs appear in a transcript.",
+      "The agent should not prescribe exercises; it should route to clinician or therapist guidance."
+    ],
+    "retrieved_at": "2026-05-09"
+  },
+  {
+    "id": "healthhub_stroke_swallowing",
+    "title": "Rehabilitation after Stroke: Swallowing Difficulties",
+    "source": "HealthHub",
+    "url": "https://www.healthhub.sg/health-conditions/swallowing-difficulties",
+    "source_tier": "official",
+    "topics": ["stroke", "swallowing", "dysphagia", "speech therapy", "aspiration", "caregiver", "feeding tube"],
+    "summary": "HealthHub education source on swallowing difficulties after stroke and the role of speech therapists, dietitians, and caregiver training.",
+    "claims": [
+      "Use this as safety education when transcripts mention choking, coughing during meals, swallowing difficulty, or feeding-tube care after stroke.",
+      "Swallowing concerns should be escalated to qualified clinical review rather than handled as general advice."
+    ],
+    "retrieved_at": "2026-05-09"
+  },
+  {
+    "id": "healthhub_heart_failure_monitoring",
+    "title": "Heart Failure - Monitoring Weight and Blood Pressure",
+    "source": "HealthHub",
+    "url": "https://www.healthhub.sg/a-z/diseases-and-conditions/Heart-Failure-Monitoring-Weight-and-Blood-Pressure",
+    "source_tier": "official",
+    "topics": ["heart failure", "daily weight", "blood pressure", "fluid retention", "symptom escalation", "monitoring"],
+    "summary": "HealthHub heart-failure education source on daily weight monitoring, blood pressure tracking, and signs that may need clinical follow-up.",
+    "claims": [
+      "Use this for official education context when transcripts mention heart failure, sudden weight gain, blood-pressure checks, or fluid retention.",
+      "Escalation thresholds and medication changes should be verified with the care team."
+    ],
+    "retrieved_at": "2026-05-09"
   }
 ]

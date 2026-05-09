@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import tempfile
 from dataclasses import dataclass
 from functools import lru_cache
@@ -8,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from openai import AsyncOpenAI
 
 from .config import Settings
 
@@ -24,6 +26,30 @@ class TranscriptionInputError(TranscriptionError):
     status_code = 400
 
 
+SUPPORTED_TRANSCRIPTION_LANGUAGES = {
+    "en": "English",
+    "ms": "Malay/Bahasa",
+    "ta": "Tamil",
+    "zh": "Mandarin Chinese",
+}
+LANGUAGE_ALIASES = {
+    "": None,
+    "auto": None,
+    "detect": None,
+    "english": "en",
+    "eng": "en",
+    "malay": "ms",
+    "bahasa": "ms",
+    "bahasa melayu": "ms",
+    "bahasa malaysia": "ms",
+    "tamil": "ta",
+    "mandarin": "zh",
+    "chinese": "zh",
+    "mandarin chinese": "zh",
+    "simplified chinese": "zh",
+}
+
+
 @dataclass(frozen=True)
 class TranscriptionResult:
     text: str
@@ -31,6 +57,9 @@ class TranscriptionResult:
     model: str
     language: str | None = None
     metadata: dict[str, Any] | None = None
+    requested_language: str | None = None
+    detected_language: str | None = None
+    language_label: str | None = None
 
     def model_dump(self) -> dict[str, Any]:
         return {
@@ -38,8 +67,21 @@ class TranscriptionResult:
             "provider": self.provider,
             "model": self.model,
             "language": self.language,
+            "requested_language": self.requested_language,
+            "detected_language": self.detected_language,
+            "language_label": self.language_label,
             "metadata": self.metadata or {},
         }
+
+
+@dataclass(frozen=True)
+class TranscriptNormalization:
+    normalized_english_text: str | None
+    provider: str | None
+    model: str | None
+    status: str
+    source_language: str | None
+    metadata: dict[str, Any] | None = None
 
 
 CONTENT_TYPE_SUFFIXES = {
@@ -60,22 +102,23 @@ async def transcribe_audio(audio: bytes, content_type: str | None, settings: Set
     if len(audio) > settings.transcription_max_bytes:
         raise TranscriptionInputError(f"Audio is too large. Max size is {settings.transcription_max_bytes // (1024 * 1024)} MB.")
 
+    requested_language = normalize_transcription_language(settings.transcription_language)
     provider = settings.transcription_provider.lower().strip()
     errors: list[str] = []
     if provider in {"local", "auto", "mlx", "mlx-whisper"}:
         try:
-            return await _transcribe_locally(audio, content_type, settings)
+            return await _transcribe_locally(audio, content_type, settings, requested_language)
         except TranscriptionUnavailable as exc:
             errors.append(str(exc))
             if provider not in {"auto"}:
                 raise
 
     if provider in {"openai", "openai-api"}:
-        return await _transcribe_with_openai(audio, content_type, settings)
+        return await _transcribe_with_openai(audio, content_type, settings, requested_language)
 
     if provider in {"groq", "auto"}:
         try:
-            return await _transcribe_with_groq(audio, content_type, settings)
+            return await _transcribe_with_groq(audio, content_type, settings, requested_language)
         except TranscriptionUnavailable as exc:
             errors.append(str(exc))
             raise TranscriptionUnavailable(" ".join(errors) if errors else str(exc)) from exc
@@ -85,19 +128,19 @@ async def transcribe_audio(audio: bytes, content_type: str | None, settings: Set
     )
 
 
-async def _transcribe_locally(audio: bytes, content_type: str | None, settings: Settings) -> TranscriptionResult:
+async def _transcribe_locally(audio: bytes, content_type: str | None, settings: Settings, requested_language: str | None) -> TranscriptionResult:
     backend = settings.local_transcription_backend.lower().strip()
     errors: list[str] = []
     if backend in {"auto", "mlx", "mlx-whisper"}:
         try:
-            return await _transcribe_with_mlx_whisper(audio, content_type, settings)
+            return await _transcribe_with_mlx_whisper(audio, content_type, settings, requested_language)
         except TranscriptionUnavailable as exc:
             errors.append(str(exc))
             if backend != "auto":
                 raise
     if backend in {"auto", "faster", "faster-whisper", "cpu"}:
         try:
-            return await _transcribe_with_faster_whisper(audio, content_type, settings)
+            return await _transcribe_with_faster_whisper(audio, content_type, settings, requested_language)
         except TranscriptionUnavailable as exc:
             errors.append(str(exc))
             raise TranscriptionUnavailable(" ".join(errors) if errors else str(exc)) from exc
@@ -106,11 +149,11 @@ async def _transcribe_locally(audio: bytes, content_type: str | None, settings: 
     )
 
 
-async def _transcribe_with_mlx_whisper(audio: bytes, content_type: str | None, settings: Settings) -> TranscriptionResult:
-    return await asyncio.to_thread(_run_mlx_whisper, audio, content_type, settings)
+async def _transcribe_with_mlx_whisper(audio: bytes, content_type: str | None, settings: Settings, requested_language: str | None) -> TranscriptionResult:
+    return await asyncio.to_thread(_run_mlx_whisper, audio, content_type, settings, requested_language)
 
 
-def _run_mlx_whisper(audio: bytes, content_type: str | None, settings: Settings) -> TranscriptionResult:
+def _run_mlx_whisper(audio: bytes, content_type: str | None, settings: Settings, requested_language: str | None) -> TranscriptionResult:
     try:
         import mlx_whisper
     except Exception as exc:
@@ -123,8 +166,8 @@ def _run_mlx_whisper(audio: bytes, content_type: str | None, settings: Settings)
             audio_file.write(audio)
             temp_path = Path(audio_file.name)
         kwargs: dict[str, Any] = {"path_or_hf_repo": settings.mlx_whisper_model}
-        if settings.transcription_language:
-            kwargs["language"] = settings.transcription_language
+        if requested_language:
+            kwargs["language"] = requested_language
         output = mlx_whisper.transcribe(str(temp_path), **kwargs)
     except TranscriptionUnavailable:
         raise
@@ -141,15 +184,18 @@ def _run_mlx_whisper(audio: bytes, content_type: str | None, settings: Settings)
         text=text,
         provider="mlx-whisper",
         model=settings.mlx_whisper_model,
-        language=settings.transcription_language or None,
+        language=requested_language,
+        requested_language=requested_language,
+        detected_language=requested_language,
+        language_label=language_label(requested_language),
     )
 
 
-async def _transcribe_with_faster_whisper(audio: bytes, content_type: str | None, settings: Settings) -> TranscriptionResult:
-    return await asyncio.to_thread(_run_faster_whisper, audio, content_type, settings)
+async def _transcribe_with_faster_whisper(audio: bytes, content_type: str | None, settings: Settings, requested_language: str | None) -> TranscriptionResult:
+    return await asyncio.to_thread(_run_faster_whisper, audio, content_type, settings, requested_language)
 
 
-def _run_faster_whisper(audio: bytes, content_type: str | None, settings: Settings) -> TranscriptionResult:
+def _run_faster_whisper(audio: bytes, content_type: str | None, settings: Settings, requested_language: str | None) -> TranscriptionResult:
     try:
         model = _faster_whisper_model(settings.faster_whisper_model, settings.faster_whisper_compute_type)
     except ImportError as exc:
@@ -165,11 +211,12 @@ def _run_faster_whisper(audio: bytes, content_type: str | None, settings: Settin
             temp_path = Path(audio_file.name)
         segments, _info = model.transcribe(
             str(temp_path),
-            language=settings.transcription_language or None,
+            language=requested_language,
             beam_size=5,
             vad_filter=True,
         )
         text = " ".join(segment.text.strip() for segment in segments).strip()
+        detected_language = canonical_transcription_language(getattr(_info, "language", None))
     except Exception as exc:
         raise TranscriptionUnavailable(f"faster-whisper transcription failed: {exc}") from exc
     finally:
@@ -182,7 +229,10 @@ def _run_faster_whisper(audio: bytes, content_type: str | None, settings: Settin
         text=text,
         provider="faster-whisper",
         model=settings.faster_whisper_model,
-        language=settings.transcription_language or None,
+        language=detected_language or requested_language,
+        requested_language=requested_language,
+        detected_language=detected_language or requested_language,
+        language_label=language_label(detected_language or requested_language),
     )
 
 
@@ -193,7 +243,7 @@ def _faster_whisper_model(model_name: str, compute_type: str):
     return WhisperModel(model_name, device="cpu", compute_type=compute_type)
 
 
-async def _transcribe_with_groq(audio: bytes, content_type: str | None, settings: Settings) -> TranscriptionResult:
+async def _transcribe_with_groq(audio: bytes, content_type: str | None, settings: Settings, requested_language: str | None) -> TranscriptionResult:
     if not settings.groq_api_key:
         raise TranscriptionUnavailable("Groq transcription requires GROQ_API_KEY.")
 
@@ -204,8 +254,8 @@ async def _transcribe_with_groq(audio: bytes, content_type: str | None, settings
         "response_format": "json",
         "temperature": "0",
     }
-    if settings.transcription_language:
-        data["language"] = settings.transcription_language
+    if requested_language:
+        data["language"] = requested_language
 
     try:
         async with httpx.AsyncClient(timeout=settings.transcription_timeout_seconds) as client:
@@ -223,16 +273,20 @@ async def _transcribe_with_groq(audio: bytes, content_type: str | None, settings
     text = str(payload.get("text", "")).strip()
     if not text:
         raise TranscriptionInputError("No speech was detected in the audio.")
+    detected_language = canonical_transcription_language(payload.get("language")) or requested_language
     return TranscriptionResult(
         text=text,
         provider="groq",
         model=settings.groq_transcription_model,
-        language=settings.transcription_language or None,
+        language=detected_language,
+        requested_language=requested_language,
+        detected_language=detected_language,
+        language_label=language_label(detected_language),
         metadata=_transcription_metadata(payload),
     )
 
 
-async def _transcribe_with_openai(audio: bytes, content_type: str | None, settings: Settings) -> TranscriptionResult:
+async def _transcribe_with_openai(audio: bytes, content_type: str | None, settings: Settings, requested_language: str | None) -> TranscriptionResult:
     if not settings.openai_api_key:
         raise TranscriptionUnavailable("OpenAI transcription requires OPENAI_API_KEY.")
 
@@ -243,8 +297,11 @@ async def _transcribe_with_openai(audio: bytes, content_type: str | None, settin
         "response_format": "json",
         "temperature": "0",
     }
-    if settings.transcription_language:
-        data["language"] = settings.transcription_language
+    if requested_language:
+        data["language"] = requested_language
+    prompt = transcription_prompt(requested_language)
+    if prompt:
+        data["prompt"] = prompt
 
     try:
         async with httpx.AsyncClient(timeout=settings.transcription_timeout_seconds) as client:
@@ -265,13 +322,92 @@ async def _transcribe_with_openai(audio: bytes, content_type: str | None, settin
     text = str(payload.get("text", "")).strip()
     if not text:
         raise TranscriptionInputError("No speech was detected in the audio.")
+    detected_language = canonical_transcription_language(payload.get("language")) or requested_language
     return TranscriptionResult(
         text=text,
         provider="openai",
         model=settings.openai_transcription_model,
-        language=payload.get("language") or settings.transcription_language or None,
+        language=detected_language,
+        requested_language=requested_language,
+        detected_language=detected_language,
+        language_label=language_label(detected_language),
         metadata=_transcription_metadata(payload),
     )
+
+
+async def normalize_transcript_to_english(text: str, source_language: str | None, settings: Settings) -> TranscriptNormalization:
+    language = canonical_transcription_language(source_language)
+    if not text.strip():
+        return TranscriptNormalization(None, None, None, "empty", language)
+    if language == "en":
+        return TranscriptNormalization(None, "system", None, "not_required", language)
+    if not settings.openai_api_key:
+        return TranscriptNormalization(None, None, None, "unavailable_no_openai_api_key", language)
+
+    client = AsyncOpenAI(api_key=settings.openai_api_key)
+    try:
+        response = await client.responses.create(
+            model=settings.openai_model,
+            instructions=(
+                "Translate and normalize caregiver speech into clear English for a Singapore care-planning system. "
+                "Preserve medications, dosages, dates, times, agencies, appointment details, and uncertainty. "
+                "Return compact JSON only with keys normalized_english_text and notes. Do not add medical advice."
+            ),
+            input=json.dumps({"source_language": language or "auto", "transcript": text}, ensure_ascii=False),
+            max_output_tokens=900,
+        )
+        payload = json.loads(getattr(response, "output_text", "") or "{}")
+    except Exception as exc:
+        return TranscriptNormalization(None, "openai", settings.openai_model, "failed", language, {"error": str(exc)})
+
+    normalized = str(payload.get("normalized_english_text") or "").strip()
+    if not normalized:
+        return TranscriptNormalization(None, "openai", settings.openai_model, "empty", language, {"raw_response": payload})
+    return TranscriptNormalization(
+        normalized,
+        "openai",
+        settings.openai_model,
+        "completed",
+        language,
+        {"notes": payload.get("notes")},
+    )
+
+
+def normalize_transcription_language(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = str(value).strip().lower().replace("_", "-")
+    if cleaned in LANGUAGE_ALIASES:
+        return LANGUAGE_ALIASES[cleaned]
+    cleaned = cleaned.split("-", 1)[0]
+    if cleaned in SUPPORTED_TRANSCRIPTION_LANGUAGES:
+        return cleaned
+    raise TranscriptionInputError(
+        "Unsupported transcription language. Use auto, en, ms, ta, or zh."
+    )
+
+
+def canonical_transcription_language(value: Any) -> str | None:
+    if value is None:
+        return None
+    try:
+        return normalize_transcription_language(str(value))
+    except TranscriptionInputError:
+        return None
+
+
+def language_label(language: str | None) -> str | None:
+    return SUPPORTED_TRANSCRIPTION_LANGUAGES.get(language or "")
+
+
+def transcription_prompt(language: str | None) -> str | None:
+    if language == "zh":
+        return "Transcribe Mandarin Chinese using Simplified Chinese characters. Preserve medication names, dates, and clinic names exactly."
+    if language == "ms":
+        return "Transcribe Malay/Bahasa caregiver speech. Preserve medication names, dates, and clinic names exactly."
+    if language == "ta":
+        return "Transcribe Tamil caregiver speech in Tamil script. Preserve medication names, dates, and clinic names exactly."
+    return None
 
 
 def _transcription_metadata(payload: dict[str, Any]) -> dict[str, Any]:

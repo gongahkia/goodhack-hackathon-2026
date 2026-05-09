@@ -37,7 +37,9 @@ create table if not exists nodes (
     'synthesized_recommendation',
     'appointment_candidate',
     'calendar_write_request',
-    'user_decision'
+    'user_decision',
+    'model_evaluation',
+    'prompt_candidate'
   )),
   payload jsonb not null,
   created_by text not null check (created_by in ('agent', 'system', 'user')),
@@ -74,7 +76,8 @@ create table if not exists edges (
     'synthesized_from',
     'requires_approval',
     'approved_by_user',
-    'written_to_calendar'
+    'written_to_calendar',
+    'candidate_from'
   )),
   created_at timestamptz default now()
 );
@@ -109,7 +112,9 @@ alter table nodes add constraint nodes_type_check check (type in (
   'synthesized_recommendation',
   'appointment_candidate',
   'calendar_write_request',
-  'user_decision'
+  'user_decision',
+  'model_evaluation',
+  'prompt_candidate'
 ));
 
 alter table nodes drop constraint if exists nodes_status_check;
@@ -140,7 +145,8 @@ alter table edges add constraint edges_type_check check (type in (
   'synthesized_from',
   'requires_approval',
   'approved_by_user',
-  'written_to_calendar'
+  'written_to_calendar',
+  'candidate_from'
 ));
 
 create table if not exists nehr_records_raw (

@@ -24,9 +24,9 @@
     "type": "article",
     "condition": "mobility",
     "topic": "fall prevention home safety",
-    "title": "Making the Home Safer for Seniors",
+    "title": "7 Fall Prevention Tips for Seniors and Caregivers",
     "source": "HealthHub",
-    "url": "https://www.healthhub.sg/",
+    "url": "https://www.healthhub.sg/live-healthy/tips-on-fall-prevention",
     "tags": ["falls", "home safety", "mobility"]
   },
   {
@@ -45,9 +45,9 @@
     "type": "article",
     "condition": "dementia",
     "topic": "home routine dementia",
-    "title": "Creating a Daily Routine for Dementia Care",
-    "source": "AIC",
-    "url": "https://www.aic.sg/",
+    "title": "MindSG: Managing Dementia As A Caregiver",
+    "source": "HealthHub",
+    "url": "https://www.healthhub.sg/programmes/mindsg/caring-for-others/my-elderly-parent-managing-dementia",
     "tags": ["routine", "memory", "home care"]
   },
   {
@@ -66,9 +66,9 @@
     "type": "article",
     "condition": "stroke",
     "topic": "swallowing safety",
-    "title": "Swallowing Safety After Stroke",
+    "title": "Rehabilitation after Stroke: Swallowing Difficulties",
     "source": "HealthHub",
-    "url": "https://www.healthhub.sg/",
+    "url": "https://www.healthhub.sg/health-conditions/swallowing-difficulties",
     "tags": ["stroke", "swallowing", "safety"]
   },
   {
@@ -76,9 +76,9 @@
     "type": "article",
     "condition": "heart failure",
     "topic": "daily weight monitoring",
-    "title": "Why Daily Weight Matters in Heart Failure",
+    "title": "Heart Failure - Monitoring Weight and Blood Pressure",
     "source": "HealthHub",
-    "url": "https://www.healthhub.sg/",
+    "url": "https://www.healthhub.sg/a-z/diseases-and-conditions/Heart-Failure-Monitoring-Weight-and-Blood-Pressure",
     "tags": ["heart failure", "weight", "fluid"]
   },
   {
@@ -86,9 +86,9 @@
     "type": "article",
     "condition": "heart failure",
     "topic": "low salt diet",
-    "title": "Reducing Salt for Heart Health",
+    "title": "Heart Failure - Monitoring Fluid and Salt Intake",
     "source": "HealthHub",
-    "url": "https://www.healthhub.sg/",
+    "url": "https://www.healthhub.sg/health-conditions/heart-failure-monitoring-fluid-and-salt-intake",
     "tags": ["diet", "salt", "heart failure"]
   },
   {
@@ -107,9 +107,9 @@
     "type": "article",
     "condition": "copd",
     "topic": "breathlessness action plan",
-    "title": "Managing Breathlessness at Home",
+    "title": "Community-Acquired Pneumonia and COPD: The Airway Programme",
     "source": "HealthHub",
-    "url": "https://www.healthhub.sg/",
+    "url": "https://www.healthhub.sg/a-z/medical-and-care-facilities/the-airway-programme",
     "tags": ["copd", "breathlessness", "action plan"]
   },
   {
@@ -121,5 +121,65 @@
     "source": "AIC",
     "url": "https://www.aic.sg/caregiving/",
     "tags": ["caregiver", "respite", "support"]
+  },
+  {
+    "id": "stroke_physiotherapy_healthhub",
+    "type": "article",
+    "condition": "stroke",
+    "topic": "post stroke physiotherapy mobility",
+    "title": "Rehabilitation after Stroke: Physiotherapy",
+    "source": "HealthHub",
+    "url": "https://www.healthhub.sg/a-z/diseases-and-conditions/physiotherapy",
+    "tags": ["stroke", "physiotherapy", "mobility", "rehabilitation"]
+  },
+  {
+    "id": "post_stroke_care_healthhub",
+    "type": "article",
+    "condition": "stroke",
+    "topic": "post stroke care rehabilitation pathways",
+    "title": "Stroke: Post-stroke Care",
+    "source": "HealthHub",
+    "url": "https://www.healthhub.sg/support-and-tools/support-and-care-programmes/care-after-stroke",
+    "tags": ["stroke", "rehabilitation", "caregiver", "community care"]
+  },
+  {
+    "id": "aic_enhanced_home_personal_care",
+    "type": "article",
+    "condition": "caregiving",
+    "topic": "home personal care respite daily living",
+    "title": "Enhanced Home Personal Care",
+    "source": "AIC",
+    "url": "https://www.aic.sg/Care-Services/Enhanced-Home-Personal-Care",
+    "tags": ["home care", "respite", "daily living", "caregiver"]
+  },
+  {
+    "id": "aic_home_therapy",
+    "type": "article",
+    "condition": "mobility",
+    "topic": "home therapy rehabilitation",
+    "title": "Home Therapy",
+    "source": "AIC",
+    "url": "https://www.aic.sg/Care-Services/Home-Therapy",
+    "tags": ["home therapy", "physiotherapy", "occupational therapy", "speech therapy"]
+  },
+  {
+    "id": "aic_day_care",
+    "type": "article",
+    "condition": "caregiving",
+    "topic": "day care dementia day care caregiver respite",
+    "title": "Day Care",
+    "source": "AIC",
+    "url": "https://www.aic.sg/care-services/day-care",
+    "tags": ["day care", "dementia", "respite", "supervision"]
+  },
+  {
+    "id": "sg_enable_disability_support",
+    "type": "article",
+    "condition": "disability",
+    "topic": "disability schemes services caregiver support",
+    "title": "Disability Support",
+    "source": "SG Enable",
+    "url": "https://www.sgenable.sg/your-first-stop/disability-support",
+    "tags": ["disability", "caregiver", "schemes", "services"]
   }
 ]

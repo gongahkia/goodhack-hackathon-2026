@@ -55,6 +55,7 @@ TINYFISH_API_KEY= SEALION_API_KEY= EXA_API_KEY= OPENAI_API_KEY= DATABASE_URL= ba
 - Route-level API behavior belongs in `backend/tests/test_api_contracts.py`.
 - Transcript extraction/triage behavior belongs in `backend/tests/test_extraction_triage.py`.
 - Corpus retrieval, source classification, and local-plus-live evidence merging belong in `backend/tests/test_research_corpus.py`.
+- Learning context, model evaluations, and prompt candidate safety belong in `backend/tests/test_learning_harness.py`.
 - Network calls should be mocked unless the test is explicitly marked as an external integration test.
 - New data files must be valid JSON and covered by at least one test that asserts required metadata.
 

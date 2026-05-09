@@ -37,6 +37,8 @@ NodeType = Literal[
     "appointment_candidate",
     "calendar_write_request",
     "user_decision",
+    "model_evaluation",
+    "prompt_candidate",
 ]
 
 EdgeType = Literal[
@@ -64,6 +66,7 @@ EdgeType = Literal[
     "requires_approval",
     "approved_by_user",
     "written_to_calendar",
+    "candidate_from",
 ]
 CreatedBy = Literal["agent", "system", "user"]
 NodeStatus = Literal["pending_review", "approved", "dismissed", "edited", "clarification_required"]
@@ -149,3 +152,21 @@ class HumanEvaluationCreate(BaseModel):
     appropriateness_score: int = Field(ge=1, le=5)
     burden_score: int = Field(ge=1, le=5)
     notes: str | None = None
+
+
+class ModelEvaluationCreate(BaseModel):
+    component: str = Field(min_length=1, max_length=80)
+    input_node_ids: list[UUID] = Field(default_factory=list, max_length=20)
+    outcome: Literal["pass", "fail", "needs_review"] = "needs_review"
+    scores: dict[str, float] = Field(default_factory=dict)
+    failure_tags: list[str] = Field(default_factory=list, max_length=20)
+    notes: str | None = Field(default=None, max_length=2000)
+    recommended_follow_up: str | None = Field(default=None, max_length=1200)
+
+
+class PromptCandidateCreate(BaseModel):
+    component: str = Field(min_length=1, max_length=80)
+    proposed_prompt: str = Field(min_length=1, max_length=4000)
+    rationale: str = Field(min_length=1, max_length=1200)
+    current_prompt_version: str | None = Field(default=None, max_length=80)
+    source_model_evaluation_id: UUID | None = None

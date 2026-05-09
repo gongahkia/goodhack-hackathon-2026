@@ -7,7 +7,7 @@ from .config import Settings
 from .models import Node
 from .privacy import redact_transcript_direct_pii
 from .store import GraphStore
-from .transcription import TranscriptionError, TranscriptionInputError, transcribe_audio
+from .transcription import TranscriptionError, TranscriptionInputError, normalize_transcript_to_english, transcribe_audio
 from .v2 import sealion_regional_review
 
 
@@ -36,6 +36,7 @@ async def ingest_audio_transcription(
             },
             "transcription_provider": settings.transcription_provider,
             "transcription_model": _requested_transcription_model(settings),
+            "requested_language": result_language_setting(settings),
             "requested_at": requested_at,
         },
         "user",
@@ -51,6 +52,7 @@ async def ingest_audio_transcription(
             "byte_size": len(audio),
             "provider": settings.transcription_provider,
             "model": _requested_transcription_model(settings),
+            "requested_language": result_language_setting(settings),
         },
     )
 
@@ -77,6 +79,7 @@ async def ingest_audio_transcription(
         await store.finish_reasoning_log(log.id, "Audio transcription failed.")
         raise
 
+    normalization = await normalize_transcript_to_english(result.text, result.detected_language or result.language or result.requested_language, settings)
     received_at = datetime.now(UTC).isoformat()
     await store.update_node_payload(
         session.id,
@@ -85,6 +88,10 @@ async def ingest_audio_transcription(
             "transcription_provider": result.provider,
             "transcription_model": result.model,
             "language": result.language,
+            "requested_language": result.requested_language,
+            "detected_language": result.detected_language,
+            "language_label": result.language_label,
+            "normalization_status": normalization.status,
             "completed_at": received_at,
         },
         "approved",
@@ -95,9 +102,17 @@ async def ingest_audio_transcription(
             "patient_id": patient_id,
             "transcription_session_id": str(session.id),
             "raw_text": result.text,
+            "normalized_english_text": normalization.normalized_english_text,
             "provider": result.provider,
             "model": result.model,
             "language": result.language,
+            "requested_language": result.requested_language,
+            "detected_language": result.detected_language,
+            "language_label": result.language_label,
+            "normalization_provider": normalization.provider,
+            "normalization_model": normalization.model,
+            "normalization_status": normalization.status,
+            "normalization_metadata": normalization.metadata or {},
             "metadata": result.metadata or {},
             "created_at": received_at,
         },
@@ -114,7 +129,12 @@ async def ingest_audio_transcription(
             "transcript_id": str(transcript.id),
             "provider": result.provider,
             "model": result.model,
+            "requested_language": result.requested_language,
+            "detected_language": result.detected_language,
+            "language_label": result.language_label,
+            "normalization_status": normalization.status,
             "character_count": len(result.text),
+            "normalized_character_count": len(normalization.normalized_english_text or ""),
         },
     )
     await store.finish_reasoning_log(log.id, "Stored transcript from uploaded audio.")
@@ -136,7 +156,10 @@ async def redact_stored_transcript(
         raise ValueError("Can only redact transcript nodes")
     patient_id = str(transcript.payload.get("patient_id") or "")
     raw_text = str(transcript.payload.get("raw_text") or "")
-    redaction = redact_transcript_direct_pii(raw_text, known_people)
+    normalized_text = str(transcript.payload.get("normalized_english_text") or "").strip()
+    source_text = normalized_text or raw_text
+    redaction = redact_transcript_direct_pii(source_text, known_people)
+    original_redaction = redact_transcript_direct_pii(raw_text, known_people) if normalized_text else None
     node = await store.create_node(
         "pii_redaction",
         {
@@ -145,6 +168,13 @@ async def redact_stored_transcript(
             "redacted_text": redaction["redacted_text"],
             "placeholder_map": redaction["placeholder_map"],
             "privacy": redaction["privacy"],
+            "source_text_kind": "normalized_english" if normalized_text else "original",
+            "original_language": transcript.payload.get("language"),
+            "requested_language": transcript.payload.get("requested_language"),
+            "detected_language": transcript.payload.get("detected_language"),
+            "language_label": transcript.payload.get("language_label"),
+            "normalization_status": transcript.payload.get("normalization_status"),
+            "original_redacted_text": original_redaction["redacted_text"] if original_redaction else None,
             "created_at": datetime.now(UTC).isoformat(),
         },
         "system",
@@ -159,6 +189,9 @@ async def redact_stored_transcript(
                 "kind": "pii_redaction_summary",
                 "transcript_id": str(transcript.id),
                 "pii_redaction_id": str(node.id),
+                "source_text_kind": node.payload["source_text_kind"],
+                "requested_language": node.payload.get("requested_language"),
+                "detected_language": node.payload.get("detected_language"),
                 **redaction["privacy"],
             },
         )
@@ -225,3 +258,7 @@ def _requested_transcription_model(settings: Settings) -> str:
     if provider == "groq":
         return settings.groq_transcription_model
     return settings.mlx_whisper_model if settings.local_transcription_backend in {"auto", "mlx", "mlx-whisper"} else settings.faster_whisper_model
+
+
+def result_language_setting(settings: Settings) -> str | None:
+    return settings.transcription_language or None
