@@ -19,13 +19,17 @@ from app.v2 import (
     build_forecast,
     build_memory_profile,
     exa_search_web,
+    jina_read_url,
+    jina_rerank_documents,
     load_memory_profile,
+    openalex_search_works,
     process_caregiver_note,
     refresh_memory_profile,
     search_verified_grants,
     search_verified_resources,
     sealion_guard_check,
     sealion_regional_review,
+    semantic_scholar_search_papers,
     tinyfish_fetch_urls,
     tinyfish_search_web,
     verify_live_result,
@@ -427,9 +431,28 @@ async def test_caregiver_note_appointment_question_intent():
     store = MemoryGraphStore()
     await store.init()
     await seed_baseline(store)
+    source = (await store.list_nodes(PATIENT_ID, ["nehr_record"]))[0]
+    appointment_at = "2027-01-28T09:00:00+00:00"
+    appointment, _ = await store.create_node_with_edge(
+        "scheduled_action",
+        {
+            "patient_id": PATIENT_ID,
+            "title": "January clinic appointment",
+            "action_type": "appointment",
+            "start_at": appointment_at,
+            "end_at": "2027-01-28T10:00:00+00:00",
+        },
+        "system",
+        None,
+        "pending_review",
+        UUID("00000000-0000-0000-0000-000000000128"),
+        source.id,
+        "derived_from",
+    )
 
     result = await process_caregiver_note(store, PATIENT_ID, "for 28 Jan appointment, remind me to ask doc about the new lump")
     graph = await store.graph_subset(PATIENT_ID)
+    prep = build_appointment_prep(appointment, graph)
 
     assert result["created"] == ["caregiver_note", "care_intent"]
     assert any(node.type == "caregiver_note" for node in graph.nodes)
@@ -437,6 +460,8 @@ async def test_caregiver_note_appointment_question_intent():
     assert intent.payload["intent_type"] == "appointment_question"
     assert "new lump" in intent.payload["question"]
     assert any(edge.from_node == intent.id and edge.type == "extracted_from" for edge in graph.edges)
+    assert any(edge.from_node == intent.id and edge.to_node == appointment.id and edge.type == "clarifies" for edge in graph.edges)
+    assert prep and "Ask the doctor about the new lump" in prep["caregiver_questions"]
 
 
 @pytest.mark.asyncio
@@ -450,10 +475,102 @@ async def test_caregiver_note_decision_forecast_flow():
 
     assert "decision_forecast" in result["created"]
     assert any(node.type == "decision_forecast" and "wheelchair" in node.payload["topic"] for node in graph.nodes)
-    assert any(node.type == "research_note" for node in graph.nodes)
+    forecast_node = next(node for node in graph.nodes if node.type == "decision_forecast")
+    assert forecast_node.payload["research_sources"]
+    assert any(node.type == "research_note" and node.payload["source_links"] for node in graph.nodes)
     scheduled = [node for node in graph.nodes if node.type == "scheduled_action"]
+    forecast = build_forecast(graph)
     assert len(scheduled) == 3
     assert all(any(edge.from_node == node.id and edge.type == "derived_from" for edge in graph.edges) for node in scheduled)
+    assert any(item["id"] == str(forecast_node.id) and item["research_sources"] for item in forecast)
+
+
+@pytest.mark.asyncio
+async def test_forecast_capacity_flags_protected_rest_conflict():
+    store = MemoryGraphStore()
+    await store.init()
+    await seed_baseline(store)
+    source = (await store.list_nodes(PATIENT_ID, ["nehr_record"]))[0]
+    await store.create_node_with_edge(
+        "scheduled_action",
+        {
+            "patient_id": PATIENT_ID,
+            "title": "Research wheelchair options",
+            "description": "Flexible low-risk equipment research.",
+            "action_type": "task",
+            "start_at": "2027-06-01T13:00:00+00:00",
+            "end_at": "2027-06-01T13:45:00+00:00",
+            "timing_type": "flexible_window",
+            "urgency": "routine",
+            "rest_interrupt_allowed": False,
+        },
+        "system",
+        None,
+        "pending_review",
+        UUID("00000000-0000-0000-0000-000000000601"),
+        source.id,
+        "derived_from",
+    )
+
+    forecast = build_forecast(await store.graph_subset(PATIENT_ID))
+    item = next(card for card in forecast if card["title"] == "Research wheelchair options")
+
+    assert "Protected midday rest" in item["capacity"]["rest_conflicts"]
+    assert item["capacity"]["risk"] in {"medium", "high"}
+    assert item["capacity"]["suggested_windows"]
+
+
+@pytest.mark.asyncio
+async def test_caregiver_note_llm_extraction_uses_redacted_transcript(monkeypatch):
+    import app.v2 as v2
+
+    captured: list[dict] = []
+
+    class FakeResponses:
+        async def create(self, **request):
+            captured.append(request)
+            return type(
+                "FakeResponse",
+                (),
+                {
+                    "output_text": json.dumps(
+                        {
+                            "intent_type": "symptom_note",
+                            "topic": "new swelling",
+                            "urgency": "routine",
+                            "requires_clarification": True,
+                            "clarification_reason": "Confirm location and onset.",
+                            "confidence": 0.7,
+                        }
+                    )
+                },
+            )()
+
+    class FakeOpenAI:
+        def __init__(self, api_key):
+            self.responses = FakeResponses()
+
+    monkeypatch.setattr(v2, "AsyncOpenAI", FakeOpenAI)
+
+    store = MemoryGraphStore()
+    await store.init()
+    await seed_baseline(store)
+    result = await process_caregiver_note(
+        store,
+        PATIENT_ID,
+        "Mdm Tan Siew Lan noticed swelling. Call +65 9123 4567.",
+        settings=Settings(demo_agent_mode="openai", openai_api_key="test"),
+    )
+
+    payload = json.dumps(captured, default=str)
+    intent = result["intents"][0]
+
+    assert "Mdm Tan Siew Lan" not in payload
+    assert "+65 9123 4567" not in payload
+    assert "PERSON_1" in payload or "PATIENT_1" in payload
+    assert "PHONE_1" in payload
+    assert intent["payload"]["intent_type"] == "symptom_note"
+    assert intent["status"] == "clarification_required"
 
 
 @pytest.mark.asyncio
@@ -466,12 +583,24 @@ async def test_v2_exa_and_tinyfish_are_first_class_agent_tools_without_keys():
     toolbox = AgentToolbox(store, settings, PATIENT_ID, log.id)
     tool_names = {tool["name"] for tool in toolbox.tool_specs()}
 
-    assert {"exa_search", "tinyfish_search", "tinyfish_fetch", "sealion_regional_review", "sealion_guard_check"} <= tool_names
+    assert {
+        "exa_search",
+        "tinyfish_search",
+        "tinyfish_fetch",
+        "jina_read_url",
+        "jina_rerank",
+        "openalex_search",
+        "semantic_scholar_search",
+        "sealion_regional_review",
+        "sealion_guard_check",
+    } <= tool_names
     assert (await toolbox.exa_search("AIC mobility grants"))["configured"] is False
     assert (await toolbox.tinyfish_search("HealthHub Parkinson exercise"))["configured"] is False
     fetch = await toolbox.tinyfish_fetch(["https://example.com/nope", "https://www.aic.sg/"])
     assert fetch["configured"] is False
     assert "https://example.com/nope" in fetch["rejected_urls"]
+    assert (await toolbox.jina_rerank("mobility grant", ["AIC mobility aid support"]))["configured"] is False
+    assert (await toolbox.openalex_search("Parkinson caregiver exercise"))["configured"] is False
     assert (await toolbox.sealion_regional_review("Make this clearer"))["configured"] is False
     assert (await toolbox.sealion_guard_check("Is this safe?"))["configured"] is False
 
@@ -483,19 +612,64 @@ async def test_v2_provider_wrappers_fail_closed_when_unconfigured():
     exa = await exa_search_web("MOH caregiver grants", settings)
     tiny_search = await tinyfish_search_web("MOH caregiver grants", settings)
     tiny_fetch = await tinyfish_fetch_urls(["https://www.moh.gov.sg/"], settings)
+    jina_blocked = await jina_read_url("https://example.com/not-allowed", settings)
+    jina_rerank = await jina_rerank_documents("MOH caregiver grants", ["official grant result"], settings)
+    openalex = await openalex_search_works("Parkinson caregiver exercise", settings)
     sealion = await sealion_regional_review("Please simplify this reminder.", settings)
     guard = await sealion_guard_check("Caregiver prompt", settings)
 
     assert exa["provider"] == "exa"
     assert tiny_search["provider"] == "tinyfish_search"
     assert tiny_fetch["provider"] == "tinyfish_fetch"
+    assert jina_blocked["provider"] == "jina_reader"
+    assert jina_rerank["provider"] == "jina_reranker"
+    assert openalex["provider"] == "openalex"
     assert sealion["provider"] == "sealion"
     assert guard["provider"] == "sealion_guard"
     assert exa["configured"] is False
     assert tiny_search["configured"] is False
     assert tiny_fetch["configured"] is False
+    assert jina_blocked["result"] is None
+    assert jina_rerank["configured"] is False
+    assert openalex["configured"] is False
     assert sealion["configured"] is False
     assert guard["configured"] is False
+
+
+@pytest.mark.asyncio
+async def test_v2_semantic_scholar_public_wrapper_shape(monkeypatch):
+    class DummyResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "total": 1,
+                "data": [
+                    {
+                        "paperId": "abc",
+                        "title": "Caregiver support",
+                        "abstract": "Evidence summary",
+                        "year": 2025,
+                        "authors": [{"name": "A Researcher"}],
+                        "citationCount": 4,
+                        "isOpenAccess": True,
+                        "openAccessPdf": {"url": "https://example.org/paper.pdf"},
+                        "tldr": {"text": "Short summary"},
+                    }
+                ],
+            }
+
+    async def fake_get(self, *args, **kwargs):
+        return DummyResponse()
+
+    monkeypatch.setattr("httpx.AsyncClient.get", fake_get)
+    result = await semantic_scholar_search_papers("caregiver support", Settings(demo_agent_mode="scripted"))
+
+    assert result["provider"] == "semantic_scholar"
+    assert result["configured"] is True
+    assert result["authenticated"] is False
+    assert result["results"][0]["title"] == "Caregiver support"
 
 
 @pytest.mark.asyncio

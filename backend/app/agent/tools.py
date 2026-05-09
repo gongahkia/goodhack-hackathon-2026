@@ -10,10 +10,14 @@ from ..privacy import PiiRedactor
 from ..store import GraphStore
 from ..v2 import (
     exa_search_web,
+    jina_read_url,
+    jina_rerank_documents,
     normalize_scheduling_payload,
+    openalex_search_works,
     search_verified_resources,
     sealion_guard_check,
     sealion_regional_review,
+    semantic_scholar_search_papers,
     tinyfish_fetch_urls,
     tinyfish_search_web,
 )
@@ -135,6 +139,63 @@ class AgentToolbox:
             },
             {
                 "type": "function",
+                "name": "jina_read_url",
+                "description": "Use Jina Reader to convert an allowlisted URL into LLM-friendly text. Use for cleaner extraction when TinyFish snippets or fetch output are not enough.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string"},
+                        "allowlist": {"type": ["array", "null"], "items": {"type": "string"}},
+                        "max_chars": {"type": "integer", "minimum": 500, "maximum": 12000, "default": 5000},
+                    },
+                    "required": ["url"],
+                },
+            },
+            {
+                "type": "function",
+                "name": "jina_rerank",
+                "description": "Use Jina Reranker to rank retrieved snippets or paper summaries by relevance before deciding which sources to trust or read.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "documents": {"type": "array", "items": {"type": ["string", "object"]}, "minItems": 1, "maxItems": 20},
+                        "top_n": {"type": "integer", "minimum": 1, "maximum": 10, "default": 5},
+                        "model": {"type": "string", "default": "jina-reranker-v3"},
+                    },
+                    "required": ["query", "documents"],
+                },
+            },
+            {
+                "type": "function",
+                "name": "openalex_search",
+                "description": "Search OpenAlex scholarly works for offline evidence/evaluation support. Use to audit whether trajectories or recommendations have external research support, not to create direct care actions.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "per_page": {"type": "integer", "minimum": 1, "maximum": 10, "default": 5},
+                        "publication_year_from": {"type": ["integer", "null"]},
+                    },
+                    "required": ["query"],
+                },
+            },
+            {
+                "type": "function",
+                "name": "semantic_scholar_search",
+                "description": "Search Semantic Scholar papers for research/evaluation context. Use for citations, abstracts, TLDRs, and open-access paper links; do not turn papers directly into patient instructions.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 10, "default": 5},
+                        "year": {"type": ["string", "null"]},
+                    },
+                    "required": ["query"],
+                },
+            },
+            {
+                "type": "function",
                 "name": "sealion_regional_review",
                 "description": "Use SEA-LION as a Southeast Asia-aware language and cultural review helper. Best for Singlish, Malay, Tamil, Chinese, or caregiver-facing wording checks. Inputs are kept redacted when privacy redaction is active.",
                 "parameters": {
@@ -193,7 +254,17 @@ class AgentToolbox:
         return model_result
 
     def _redacted_external_tools(self) -> set[str]:
-        return {"exa_search", "tinyfish_search", "tinyfish_fetch", "sealion_regional_review", "sealion_guard_check"}
+        return {
+            "exa_search",
+            "tinyfish_search",
+            "tinyfish_fetch",
+            "jina_read_url",
+            "jina_rerank",
+            "openalex_search",
+            "semantic_scholar_search",
+            "sealion_regional_review",
+            "sealion_guard_check",
+        }
 
     async def read_nehr_records(self, patient_id: str, since: str | None = None) -> list[dict[str, Any]]:
         since_dt = datetime.fromisoformat(since) if since else None
@@ -256,6 +327,29 @@ class AgentToolbox:
 
     async def tinyfish_fetch(self, urls: list[str], allowlist: list[str] | None = None, format: str = "markdown") -> dict[str, Any]:
         return await tinyfish_fetch_urls(urls, self.settings, allowlist, format)
+
+    async def jina_read_url(self, url: str, allowlist: list[str] | None = None, max_chars: int = 5000) -> dict[str, Any]:
+        return await jina_read_url(url, self.settings, allowlist, max_chars)
+
+    async def jina_rerank(
+        self,
+        query: str,
+        documents: list[str | dict[str, Any]],
+        top_n: int = 5,
+        model: str = "jina-reranker-v3",
+    ) -> dict[str, Any]:
+        return await jina_rerank_documents(query, documents, self.settings, top_n, model)
+
+    async def openalex_search(
+        self,
+        query: str,
+        per_page: int = 5,
+        publication_year_from: int | None = None,
+    ) -> dict[str, Any]:
+        return await openalex_search_works(query, self.settings, per_page, publication_year_from)
+
+    async def semantic_scholar_search(self, query: str, limit: int = 5, year: str | None = None) -> dict[str, Any]:
+        return await semantic_scholar_search_papers(query, self.settings, limit, year)
 
     async def sealion_regional_review(
         self,

@@ -53,6 +53,7 @@ export type AppointmentPrep = {
   long_term_concerns: string[];
   recurring_concerns: string[];
   previous_questions: string[];
+  caregiver_questions?: string[];
   unresolved_advice: string[];
   revisit_next_time: string[];
   evidence: EvidenceSummary[];
@@ -130,9 +131,17 @@ export type ForecastItem = {
   apply_url?: string | null;
   missing_documents: string[];
   deadline_conflicts: string[];
-  capacity: { weekly_action_count: number; risk: "low" | "medium" | "high" | string; note: string };
+  capacity: {
+    weekly_action_count: number;
+    risk: "low" | "medium" | "high" | string;
+    note: string;
+    rest_conflicts?: string[];
+    suggested_windows?: Array<{ label: string; start: string; end: string }>;
+  };
   timeline: Array<{ label: string; detail: string }>;
   evidence: EvidenceSummary[];
+  research_sources?: Array<{ title?: string | null; source?: string | null; url?: string | null; snippet?: string | null; verification_status?: string | null; retrieved_at?: string | null }>;
+  scheduled_action_ids?: string[];
 };
 
 export type PatientSummary = {

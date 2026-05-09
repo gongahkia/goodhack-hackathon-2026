@@ -77,7 +77,7 @@ The current repository implements the v1 hackathon MVP described in [ROADMAP.md]
   * Event detail renders readable reasoning narratives, not only raw logs
   * `.ics` calendar export and subscription feed for external calendar apps
   * `/resources/search` and `/grants/search` return allowlisted, verified resources with curated fallback when live search is unavailable
-  * Exa search, TinyFish rendered search, TinyFish fetch, and SEA-LION regional review/safety checks are exposed as first-class model tools with allowlist and redaction checks
+  * Exa search, TinyFish rendered search, TinyFish fetch, Jina Reader/Reranker, OpenAlex, Semantic Scholar, and SEA-LION regional review/safety checks are exposed as first-class model tools with allowlist and redaction checks
   * Caregiver memory signals are passed back into future reasoning so low-risk suggestions can be down-ranked without suppressing high-priority care actions
 * Language support
   * English, Bahasa Melayu, Chinese, and Tamil UI language packs
@@ -169,6 +169,9 @@ OPENAI_API_KEY=
 OPENAI_MODEL=gpt-5.5
 EXA_API_KEY=
 TINYFISH_API_KEY=
+JINA_API_KEY=
+OPENALEX_API_KEY=
+SEMANTIC_SCHOLAR_API_KEY=
 SEALION_API_KEY=
 SEALION_MODEL=aisingapore/Gemma-SEA-LION-v4-27B-IT
 SEALION_GUARD_MODEL=aisingapore/SEA-Guard
@@ -201,6 +204,9 @@ OPENAI_API_KEY=...
 OPENAI_MODEL=gpt-5.5
 EXA_API_KEY=...
 TINYFISH_API_KEY=...
+JINA_API_KEY=...
+OPENALEX_API_KEY=...
+SEMANTIC_SCHOLAR_API_KEY=...
 SEALION_API_KEY=...
 CORS_ORIGINS=https://your-frontend.example
 ```
@@ -226,7 +232,7 @@ Backend tests cover:
 * v1 care plan generation
 * scheduled-action provenance enforcement
 * bidirectional trace helpers
-* v2 memory summaries, memory-conditioned reasoning, first-class Exa/TinyFish tooling, care-plan review, verified search, and `.ics` export generation
+* v2 memory summaries, memory-conditioned reasoning, first-class Exa/TinyFish/Jina/OpenAlex/Semantic Scholar/SEA-LION tooling, care-plan review, verified search, and `.ics` export generation
 
 Frontend build checks:
 

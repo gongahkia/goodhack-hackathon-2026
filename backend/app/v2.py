@@ -311,29 +311,40 @@ async def process_caregiver_note(store: GraphStore, patient_id: str, text: str, 
     if extracted_intent:
         await store.update_node_payload(note.id, {"llm_extraction_redacted": extracted_intent}, "approved")
         intent_type = str(extracted_intent.get("intent_type") or "")
-        if intent_type not in {"appointment_question", "decision_forecast"}:
-            intent = await store.create_node(
-                "care_intent",
-                {
-                    "patient_id": patient_id,
-                    "intent_type": intent_type or "general_caregiver_note",
-                    "raw_text_redacted": redacted_text,
-                    "normalized": extracted_intent,
-                    "requires_clarification": bool(extracted_intent.get("requires_clarification")),
-                    "clarification_reason": extracted_intent.get("clarification_reason"),
-                },
-                "system",
-                status="clarification_required" if extracted_intent.get("requires_clarification") else "pending_review",
-            )
-            await store.create_edge(intent.id, note.id, "extracted_from")
+        if intent_type == "appointment_question":
+            intent = await _create_appointment_question_intent(store, graph, note, patient_id, text, redacted_text)
             return {"note": note.model_dump(mode="json"), "intents": [intent.model_dump(mode="json")], "created": ["caregiver_note", "care_intent"]}
+        if intent_type == "decision_forecast":
+            created = await _create_decision_forecast_flow(store, note, patient_id, text, redacted_text, settings)
+            return {
+                "note": note.model_dump(mode="json"),
+                "intents": [created["forecast"].model_dump(mode="json")],
+                "research_notes": [item.model_dump(mode="json") for item in created["research_notes"]],
+                "scheduled_actions": [item.model_dump(mode="json") for item in created["scheduled_actions"]],
+                "created": ["caregiver_note", "decision_forecast", "research_note", "scheduled_action"],
+            }
+        intent = await store.create_node(
+            "care_intent",
+            {
+                "patient_id": patient_id,
+                "intent_type": intent_type or "general_caregiver_note",
+                "raw_text_redacted": redacted_text,
+                "normalized": extracted_intent,
+                "requires_clarification": bool(extracted_intent.get("requires_clarification")),
+                "clarification_reason": extracted_intent.get("clarification_reason"),
+            },
+            "system",
+            status="clarification_required" if extracted_intent.get("requires_clarification") else "pending_review",
+        )
+        await store.create_edge(intent.id, note.id, "extracted_from")
+        return {"note": note.model_dump(mode="json"), "intents": [intent.model_dump(mode="json")], "created": ["caregiver_note", "care_intent"]}
 
     if "appointment" in lowered or "ask doc" in lowered or "ask doctor" in lowered:
         intent = await _create_appointment_question_intent(store, graph, note, patient_id, text, redacted_text)
         return {"note": note.model_dump(mode="json"), "intents": [intent.model_dump(mode="json")], "created": ["caregiver_note", "care_intent"]}
 
     if "decide" in lowered and ("wheelchair" in lowered or "mobility" in lowered or "equipment" in lowered):
-        created = await _create_decision_forecast_flow(store, note, patient_id, text, redacted_text)
+        created = await _create_decision_forecast_flow(store, note, patient_id, text, redacted_text, settings)
         return {
             "note": note.model_dump(mode="json"),
             "intents": [created["forecast"].model_dump(mode="json")],
@@ -566,7 +577,14 @@ async def _create_appointment_question_intent(store: GraphStore, graph: GraphSub
     return intent
 
 
-async def _create_decision_forecast_flow(store: GraphStore, note: Node, patient_id: str, text: str, redacted_text: str) -> dict[str, Any]:
+async def _create_decision_forecast_flow(
+    store: GraphStore,
+    note: Node,
+    patient_id: str,
+    text: str,
+    redacted_text: str,
+    settings: Settings | None = None,
+) -> dict[str, Any]:
     due_date = _parse_spoken_date(text)
     if not due_date:
         forecast = await store.create_node(
@@ -585,6 +603,7 @@ async def _create_decision_forecast_flow(store: GraphStore, note: Node, patient_
         return {"forecast": forecast, "research_notes": [], "scheduled_actions": []}
 
     topic = _decision_topic(text)
+    research_sources = await _decision_research_sources(topic, settings)
     forecast = await store.create_node(
         "decision_forecast",
         {
@@ -593,6 +612,8 @@ async def _create_decision_forecast_flow(store: GraphStore, note: Node, patient_
             "decision_due_at": due_date.replace(hour=18, minute=0, second=0, microsecond=0).isoformat(),
             "raw_text_redacted": redacted_text,
             "safety_tier": "planning",
+            "research_sources": research_sources,
+            "missing_decision_inputs": _decision_missing_inputs(topic),
         },
         "system",
         status="pending_review",
@@ -606,6 +627,8 @@ async def _create_decision_forecast_flow(store: GraphStore, note: Node, patient_
             "topic": topic,
             "summary": f"Research options, costs, funding, and clinician criteria before deciding whether to proceed with {topic}.",
             "source": "caregiver_note",
+            "source_links": research_sources,
+            "freshness": "curated_plus_allowlisted_live" if settings and not settings.use_scripted_agent else "curated",
         },
         "system",
         status="pending_review",
@@ -712,6 +735,43 @@ def _matching_appointment(graph: GraphSubset, target_date: datetime | None) -> N
     return None
 
 
+async def _decision_research_sources(topic: str, settings: Settings | None) -> list[dict[str, Any]]:
+    queries = [topic]
+    if "wheelchair" in topic.lower() or "mobility" in topic.lower():
+        queries.append("mobility aid wheelchair")
+    sources: list[dict[str, Any]] = []
+    effective_settings = settings or Settings(demo_agent_mode="scripted")
+    for query in queries:
+        grants = await search_verified_grants(query, effective_settings)
+        resources = await search_verified_resources(query, effective_settings)
+        sources.extend(
+            {
+                "title": item.get("title"),
+                "source": item.get("source"),
+                "url": item.get("url"),
+                "snippet": item.get("snippet"),
+                "verification_status": item.get("verification_status"),
+                "retrieved_at": item.get("retrieved_at"),
+            }
+            for item in [*grants, *resources]
+            if item.get("verification_status") != "reject"
+        )
+    deduped: dict[str, dict[str, Any]] = {}
+    for source in sources:
+        key = str(source.get("url") or source.get("title") or "")
+        if key and key not in deduped:
+            deduped[key] = source
+    return list(deduped.values())[:6]
+
+
+def _decision_missing_inputs(topic: str) -> list[str]:
+    topic_text = topic.lower()
+    inputs = ["Clinician recommendation or criteria", "Family decision owner", "Budget or subsidy eligibility", "Target decision date"]
+    if "wheelchair" in topic_text or "mobility" in topic_text:
+        inputs.extend(["Mobility assessment", "Equipment quotation", "Home storage and transport constraints"])
+    return inputs
+
+
 def with_scheduling_metadata(node: Node) -> Node:
     if node.type != "scheduled_action":
         return node
@@ -743,6 +803,7 @@ def build_appointment_prep(event: Node, graph: GraphSubset) -> dict[str, Any] | 
     long_term = ["Check whether any future equipment, therapy, or caregiver support planning should begin now"]
     recurring_concerns = _recurring_care_concerns(graph, event)
     previous_questions = _previous_clinician_questions(graph, event)
+    dictated_questions = _appointment_caregiver_questions(graph, event)
     unresolved_advice = _unresolved_advice(graph, event)
     revisit_next_time = ["Revisit any prior advice that has not turned into a scheduled care action yet"]
 
@@ -776,6 +837,7 @@ def build_appointment_prep(event: Node, graph: GraphSubset) -> dict[str, Any] | 
         "long_term_concerns": long_term,
         "recurring_concerns": recurring_concerns[:5],
         "previous_questions": previous_questions[:5],
+        "caregiver_questions": dictated_questions[:8],
         "unresolved_advice": unresolved_advice[:5],
         "revisit_next_time": revisit_next_time[:5],
         "evidence": [_source_summary(source) for source in sources],
@@ -789,7 +851,10 @@ def build_forecast(graph: GraphSubset) -> list[dict[str, Any]]:
         for action in actions
         if _is_forecast_action(action)
     ]
-    return [_forecast_card(action, graph) for action in sorted(forecast_actions, key=lambda node: str(node.payload.get("start_at") or ""))]
+    decision_forecasts = [node for node in graph.nodes if node.type == "decision_forecast" and node.status != "dismissed"]
+    cards = [_forecast_card(action, graph) for action in sorted(forecast_actions, key=lambda node: str(node.payload.get("start_at") or ""))]
+    cards.extend(_decision_forecast_card(node, graph) for node in sorted(decision_forecasts, key=lambda item: str(item.payload.get("decision_due_at") or "")))
+    return sorted(cards, key=lambda item: str(item.get("target_date") or ""))
 
 
 def _is_forecast_action(action: Node) -> bool:
@@ -849,6 +914,40 @@ def _forecast_card(action: Node, graph: GraphSubset) -> dict[str, Any]:
         "capacity": capacity,
         "timeline": timeline,
         "evidence": [_source_summary(source) for source in sources],
+        "research_sources": _related_research_sources(action, graph),
+    }
+
+
+def _decision_forecast_card(forecast: Node, graph: GraphSubset) -> dict[str, Any]:
+    topic = str(forecast.payload.get("topic") or "Care decision")
+    due_at = forecast.payload.get("decision_due_at")
+    research_notes = _research_notes_for_forecast(forecast, graph)
+    scheduled = _scheduled_from_forecast(forecast, graph)
+    missing_inputs = forecast.payload.get("missing_decision_inputs") or _decision_missing_inputs(topic)
+    research_sources = forecast.payload.get("research_sources") or [source for note in research_notes for source in note.payload.get("source_links", [])]
+    timeline = [
+        {"label": "Caregiver note", "detail": "Decision forecast came from a caregiver-captured note."},
+        {"label": "Research", "detail": _research_summary(research_notes, research_sources)},
+        {"label": "Missing inputs", "detail": ", ".join(str(item) for item in missing_inputs[:5])},
+        {"label": "Prep checkpoints", "detail": f"{len(scheduled)} scheduled prep action{'s' if len(scheduled) != 1 else ''} are linked to this decision."},
+        {"label": "Decision deadline", "detail": f"Decide by {_human_datetime(due_at)}." if due_at else "Confirm the decision deadline before scheduling."},
+    ]
+    return {
+        "id": str(forecast.id),
+        "title": f"Decision: {topic}",
+        "category": "equipment" if any(word in topic.lower() for word in ["wheelchair", "mobility", "aid", "equipment"]) else "care_service",
+        "status": forecast.status,
+        "target_date": due_at,
+        "summary": f"Track options, documents, and check-ins before deciding on {topic}.",
+        "agency": None,
+        "apply_url": None,
+        "missing_documents": [str(item) for item in missing_inputs],
+        "deadline_conflicts": _decision_deadline_conflicts(forecast, graph),
+        "capacity": _decision_capacity_signal(forecast, graph),
+        "timeline": timeline,
+        "evidence": [_source_summary(source) for source in backtrace_sources(forecast, graph.nodes, graph.edges)],
+        "research_sources": research_sources[:6],
+        "scheduled_action_ids": [str(node.id) for node in scheduled],
     }
 
 
@@ -882,6 +981,29 @@ def _previous_clinician_questions(graph: GraphSubset, event: Node) -> list[str]:
     if event.payload.get("action_type") == "appointment":
         return ["What symptoms or care needs should trigger an earlier review?"]
     return []
+
+
+def _appointment_caregiver_questions(graph: GraphSubset, event: Node) -> list[str]:
+    by_id = {node.id: node for node in graph.nodes}
+    linked: list[Node] = []
+    for edge in graph.edges:
+        if edge.type == "clarifies" and edge.to_node == event.id:
+            intent = by_id.get(edge.from_node)
+            if intent and intent.type == "care_intent":
+                linked.append(intent)
+    if not linked and (event_start := _parse_datetime(event.payload.get("start_at"))):
+        for node in graph.nodes:
+            if node.type != "care_intent" or node.payload.get("intent_type") != "appointment_question":
+                continue
+            target_date = _parse_datetime(node.payload.get("target_date"))
+            if target_date and target_date.date() == event_start.date():
+                linked.append(node)
+    questions = []
+    for intent in sorted(linked, key=lambda item: item.created_at):
+        question = str(intent.payload.get("question") or intent.payload.get("normalized", {}).get("topic") or "").strip()
+        if question:
+            questions.append(question)
+    return list(dict.fromkeys(questions))
 
 
 def _unresolved_advice(graph: GraphSubset, event: Node) -> list[str]:
@@ -945,10 +1067,131 @@ def _capacity_signal(action: Node, graph: GraphSubset) -> dict[str, Any]:
     ]
     load = len(weekly_actions)
     risk = "low" if load <= 3 else "medium" if load <= 6 else "high"
+    rest_conflicts = _rest_conflicts(action)
+    if rest_conflicts and not action.payload.get("rest_interrupt_allowed"):
+        risk = "high" if risk == "medium" else "medium" if risk == "low" else risk
     return {
         "weekly_action_count": load,
         "risk": risk,
-        "note": "Keep the week manageable before adding applications or equipment visits." if risk != "low" else "Care workload looks manageable for this target week.",
+        "note": _capacity_note(risk, rest_conflicts, bool(action.payload.get("rest_interrupt_allowed"))),
+        "rest_conflicts": rest_conflicts,
+        "suggested_windows": _suggested_windows(action),
+    }
+
+
+def _capacity_note(risk: str, rest_conflicts: list[str], rest_interrupt_allowed: bool) -> str:
+    if rest_conflicts and not rest_interrupt_allowed:
+        return "This low-risk flexible task overlaps protected rest; move it into a morning or evening care window."
+    if rest_conflicts:
+        return "This urgent or fixed task overlaps protected rest; explain the interruption before showing it as unavoidable."
+    return "Keep the week manageable before adding applications or equipment visits." if risk != "low" else "Care workload looks manageable for this target week."
+
+
+def _rest_conflicts(action: Node) -> list[str]:
+    start = _parse_datetime(action.payload.get("start_at"))
+    end = _parse_datetime(action.payload.get("end_at")) or (start + timedelta(minutes=int(action.payload.get("estimated_effort_minutes") or 30)) if start else None)
+    if not start or not end:
+        return []
+    conflicts = []
+    for label, rest_start, rest_end in [("Protected midday rest", 12, 18), ("Overnight rest", 22, 24), ("Overnight rest", 0, 6)]:
+        if _hours_overlap(start.hour + start.minute / 60, end.hour + end.minute / 60, rest_start, rest_end):
+            conflicts.append(label)
+    return list(dict.fromkeys(conflicts))
+
+
+def _hours_overlap(start_hour: float, end_hour: float, window_start: float, window_end: float) -> bool:
+    if end_hour <= start_hour:
+        end_hour = start_hour + 0.5
+    return start_hour < window_end and end_hour > window_start
+
+
+def _suggested_windows(action: Node) -> list[dict[str, str]]:
+    if action.payload.get("timing_type") in {"fixed_time", "deadline"}:
+        return []
+    movable = action.payload.get("movable_window")
+    if isinstance(movable, dict) and movable.get("start") and movable.get("end"):
+        return [{"label": "Current movable window", "start": str(movable["start"]), "end": str(movable["end"])}]
+    return [
+        {"label": "Morning care window", "start": "08:00", "end": "12:00"},
+        {"label": "Evening care window", "start": "18:00", "end": "21:00"},
+    ]
+
+
+def _research_notes_for_forecast(forecast: Node, graph: GraphSubset) -> list[Node]:
+    by_id = {node.id: node for node in graph.nodes}
+    notes = []
+    for edge in graph.edges:
+        if edge.type == "researches" and edge.to_node == forecast.id:
+            note = by_id.get(edge.from_node)
+            if note and note.type == "research_note":
+                notes.append(note)
+    return notes
+
+
+def _scheduled_from_forecast(forecast: Node, graph: GraphSubset) -> list[Node]:
+    by_id = {node.id: node for node in graph.nodes}
+    actions = []
+    for edge in graph.edges:
+        if edge.type in {"scheduled_from", "derived_from"} and edge.to_node == forecast.id:
+            action = by_id.get(edge.from_node)
+            if action and action.type == "scheduled_action" and action.status != "dismissed":
+                actions.append(action)
+    return list({node.id: node for node in actions}.values())
+
+
+def _related_research_sources(action: Node, graph: GraphSubset) -> list[dict[str, Any]]:
+    sources = []
+    by_id = {node.id: node for node in graph.nodes}
+    for edge in graph.edges:
+        if edge.from_node != action.id:
+            continue
+        target = by_id.get(edge.to_node)
+        if target and target.type == "decision_forecast":
+            sources.extend(target.payload.get("research_sources") or [])
+            for note in _research_notes_for_forecast(target, graph):
+                sources.extend(note.payload.get("source_links") or [])
+    return sources[:6]
+
+
+def _research_summary(research_notes: list[Node], research_sources: list[dict[str, Any]]) -> str:
+    if research_sources:
+        return f"{len(research_sources)} source-linked research result{'s' if len(research_sources) != 1 else ''} are attached."
+    if research_notes:
+        return "Research note created; source details still need review."
+    return "Research has not started yet."
+
+
+def _decision_deadline_conflicts(forecast: Node, graph: GraphSubset) -> list[str]:
+    due_at = _parse_datetime(forecast.payload.get("decision_due_at"))
+    if not due_at:
+        return ["Decision deadline needs confirmation."]
+    conflicts = []
+    scheduled = _scheduled_from_forecast(forecast, graph)
+    if not scheduled:
+        conflicts.append("No prep checkpoints are scheduled for this decision yet.")
+    if any(_parse_datetime(node.payload.get("start_at")) and (_parse_datetime(node.payload.get("start_at")) or due_at) > due_at for node in scheduled):
+        conflicts.append("One or more prep checkpoints falls after the decision deadline.")
+    if due_at < datetime.now(UTC) + timedelta(days=14):
+        conflicts.append("Decision deadline is within two weeks; review missing inputs urgently.")
+    return conflicts
+
+
+def _decision_capacity_signal(forecast: Node, graph: GraphSubset) -> dict[str, Any]:
+    scheduled = _scheduled_from_forecast(forecast, graph)
+    if not scheduled:
+        return {"weekly_action_count": 0, "risk": "medium", "note": "No prep work is scheduled yet.", "rest_conflicts": [], "suggested_windows": []}
+    combined_conflicts = []
+    suggested = []
+    for action in scheduled:
+        signal = _capacity_signal(action, graph)
+        combined_conflicts.extend(signal.get("rest_conflicts", []))
+        suggested.extend(signal.get("suggested_windows", []))
+    return {
+        "weekly_action_count": len(scheduled),
+        "risk": "high" if combined_conflicts else "medium" if len(scheduled) >= 3 else "low",
+        "note": "Decision prep has rest conflicts to resolve." if combined_conflicts else "Decision prep checkpoints are scheduled before the deadline.",
+        "rest_conflicts": list(dict.fromkeys(combined_conflicts)),
+        "suggested_windows": suggested[:4],
     }
 
 
@@ -1165,6 +1408,154 @@ async def tinyfish_fetch_urls(
             "results": [],
             "errors": [],
             "rejected_urls": rejected_urls,
+            "error": str(exc),
+        }
+
+
+async def jina_read_url(
+    url: str,
+    settings: Settings,
+    allowlist: list[str] | None = None,
+    max_chars: int = 5000,
+) -> dict[str, Any]:
+    domains = allowlist or DEFAULT_ALLOWED_DOMAINS
+    if not _url_allowed(url, domains):
+        return {
+            "provider": "jina_reader",
+            "configured": bool(settings.jina_api_key),
+            "allowlist": domains,
+            "result": None,
+            "error": "URL rejected by allowlist.",
+        }
+    headers = {"Accept": "text/plain"}
+    if settings.jina_api_key:
+        headers["Authorization"] = f"Bearer {settings.jina_api_key}"
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(f"https://r.jina.ai/{url}", headers=headers)
+            response.raise_for_status()
+        return {
+            "provider": "jina_reader",
+            "configured": bool(settings.jina_api_key),
+            "authenticated": bool(settings.jina_api_key),
+            "allowlist": domains,
+            "url": url,
+            "text": response.text[: max(500, min(max_chars, 12000))],
+        }
+    except httpx.HTTPError as exc:
+        return {
+            "provider": "jina_reader",
+            "configured": bool(settings.jina_api_key),
+            "authenticated": bool(settings.jina_api_key),
+            "allowlist": domains,
+            "result": None,
+            "error": str(exc),
+        }
+
+
+async def jina_rerank_documents(
+    query: str,
+    documents: list[str | dict[str, Any]],
+    settings: Settings,
+    top_n: int = 5,
+    model: str = "jina-reranker-v3",
+) -> dict[str, Any]:
+    if not settings.jina_api_key:
+        return {"provider": "jina_reranker", "configured": False, "results": [], "error": "JINA_API_KEY is not configured."}
+    normalized_documents = [_document_text(document) for document in documents[:20]]
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                "https://api.jina.ai/v1/rerank",
+                headers={"Authorization": f"Bearer {settings.jina_api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": model,
+                    "query": query,
+                    "documents": normalized_documents,
+                    "top_n": max(1, min(top_n, len(normalized_documents) or 1, 10)),
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+        results = []
+        for item in data.get("results", []):
+            index = item.get("index")
+            result = {
+                "index": index,
+                "relevance_score": item.get("relevance_score"),
+                "document": item.get("document") or (normalized_documents[index] if isinstance(index, int) and 0 <= index < len(normalized_documents) else None),
+            }
+            if isinstance(index, int) and 0 <= index < len(documents):
+                result["source"] = documents[index]
+            results.append(result)
+        return {"provider": "jina_reranker", "configured": True, "model": model, "results": results}
+    except httpx.HTTPError as exc:
+        return {"provider": "jina_reranker", "configured": True, "model": model, "results": [], "error": str(exc)}
+
+
+async def openalex_search_works(
+    query: str,
+    settings: Settings,
+    per_page: int = 5,
+    publication_year_from: int | None = None,
+) -> dict[str, Any]:
+    if not settings.openalex_api_key:
+        return {"provider": "openalex", "configured": False, "results": [], "error": "OPENALEX_API_KEY is not configured."}
+    params: dict[str, Any] = {
+        "api_key": settings.openalex_api_key,
+        "search": query,
+        "per_page": max(1, min(per_page, 10)),
+        "select": "id,doi,title,display_name,publication_year,authorships,primary_location,open_access,cited_by_count,abstract_inverted_index",
+    }
+    if publication_year_from:
+        params["filter"] = f"from_publication_date:{publication_year_from}-01-01"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get("https://api.openalex.org/works", params=params)
+            response.raise_for_status()
+            data = response.json()
+        return {
+            "provider": "openalex",
+            "configured": True,
+            "meta": data.get("meta", {}),
+            "results": [_openalex_work_summary(item) for item in data.get("results", [])],
+        }
+    except httpx.HTTPError as exc:
+        return {"provider": "openalex", "configured": True, "results": [], "error": str(exc)}
+
+
+async def semantic_scholar_search_papers(
+    query: str,
+    settings: Settings,
+    limit: int = 5,
+    year: str | None = None,
+) -> dict[str, Any]:
+    headers = {"x-api-key": settings.semantic_scholar_api_key} if settings.semantic_scholar_api_key else {}
+    params: dict[str, Any] = {
+        "query": query,
+        "limit": max(1, min(limit, 10)),
+        "fields": "title,abstract,url,year,authors,citationCount,isOpenAccess,openAccessPdf,tldr,venue,publicationTypes",
+    }
+    if year:
+        params["year"] = year
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get("https://api.semanticscholar.org/graph/v1/paper/search", headers=headers, params=params)
+            response.raise_for_status()
+            data = response.json()
+        return {
+            "provider": "semantic_scholar",
+            "configured": True,
+            "authenticated": bool(settings.semantic_scholar_api_key),
+            "total": data.get("total"),
+            "results": [_semantic_scholar_paper_summary(item) for item in data.get("data", [])],
+        }
+    except httpx.HTTPError as exc:
+        return {
+            "provider": "semantic_scholar",
+            "configured": True,
+            "authenticated": bool(settings.semantic_scholar_api_key),
+            "results": [],
             "error": str(exc),
         }
 
@@ -1543,6 +1934,66 @@ def _domain(url: str) -> str:
 def _url_allowed(url: str, allowlist: list[str]) -> bool:
     domain = _domain(url)
     return bool(domain) and any(domain == allowed or domain.endswith(f".{allowed}") for allowed in allowlist)
+
+
+def _document_text(document: str | dict[str, Any]) -> str:
+    if isinstance(document, str):
+        return document[:4000]
+    return " ".join(
+        str(document.get(key) or "")
+        for key in ["title", "source", "snippet", "abstract", "summary", "url"]
+    ).strip()[:4000]
+
+
+def _openalex_work_summary(item: dict[str, Any]) -> dict[str, Any]:
+    authors = []
+    for authorship in item.get("authorships", [])[:5]:
+        author = authorship.get("author") or {}
+        if author.get("display_name"):
+            authors.append(author["display_name"])
+    location = item.get("primary_location") or {}
+    source = location.get("source") or {}
+    return {
+        "id": item.get("id"),
+        "doi": item.get("doi"),
+        "title": item.get("title") or item.get("display_name"),
+        "year": item.get("publication_year"),
+        "authors": authors,
+        "source": source.get("display_name"),
+        "url": location.get("landing_page_url") or item.get("doi") or item.get("id"),
+        "is_open_access": (item.get("open_access") or {}).get("is_oa"),
+        "cited_by_count": item.get("cited_by_count"),
+        "abstract": _openalex_abstract(item.get("abstract_inverted_index")),
+    }
+
+
+def _openalex_abstract(index: dict[str, list[int]] | None) -> str | None:
+    if not index:
+        return None
+    words: list[tuple[int, str]] = []
+    for word, positions in index.items():
+        for position in positions:
+            words.append((position, word))
+    return " ".join(word for _, word in sorted(words))[:1200]
+
+
+def _semantic_scholar_paper_summary(item: dict[str, Any]) -> dict[str, Any]:
+    tldr = item.get("tldr") or {}
+    pdf = item.get("openAccessPdf") or {}
+    return {
+        "paper_id": item.get("paperId"),
+        "title": item.get("title"),
+        "abstract": item.get("abstract"),
+        "tldr": tldr.get("text") if isinstance(tldr, dict) else None,
+        "year": item.get("year"),
+        "authors": [author.get("name") for author in item.get("authors", [])[:5] if author.get("name")],
+        "venue": item.get("venue"),
+        "url": item.get("url"),
+        "pdf_url": pdf.get("url") if isinstance(pdf, dict) else None,
+        "is_open_access": item.get("isOpenAccess"),
+        "citation_count": item.get("citationCount"),
+        "publication_types": item.get("publicationTypes") or [],
+    }
 
 
 def _source_from_url(url: Any) -> str:
