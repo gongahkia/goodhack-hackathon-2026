@@ -33,6 +33,7 @@ EXA_API_KEY=
 DATABASE_URL=
 RUN_LIVE_OPENAI_TESTS=0
 RUN_LIVE_TINYFISH_TESTS=0
+RUN_LIVE_EXTERNAL_E2E=0
 RUN_POSTGRES_INTEGRATION_TESTS=0
 ```
 
@@ -74,6 +75,19 @@ OPENAI_API_KEY=... \
 LIVE_OPENAI_AUDIO_PATH=/absolute/path/to/speech.wav \
 backend/.venv/bin/python -m pytest backend/tests/test_live_integrations.py -m integration
 ```
+
+Run the one live external-provider full API E2E with:
+
+```bash
+RUN_LIVE_EXTERNAL_E2E=1 \
+OPENAI_API_KEY=... \
+GOOGLE_CALENDAR_ACCESS_TOKEN=... \
+GOOGLE_CALENDAR_ID=primary \
+TINYFISH_API_KEY=... \
+make live-external-e2e
+```
+
+This test uses the backend API surface, real OpenAI transcription, real Google Calendar read/write, and live TinyFish or Exa research. It creates temporary calendar events and deletes them by default. Set `LIVE_EXTERNAL_E2E_AUDIO_PATH=/absolute/path/to/demo.wav` to use a prerecorded clip; otherwise macOS `say` and `afconvert` generate audio from the built-in caregiver scenario.
 
 Run the opt-in multilingual OpenAI quality checks with one audio file and expected transcript per language:
 

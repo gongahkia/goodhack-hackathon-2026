@@ -224,53 +224,48 @@ Run the complete backend suite when time allows:
 TINYFISH_API_KEY= SEALION_API_KEY= backend/.venv/bin/python -m pytest backend/tests -q
 ```
 
-### Live Token Smoke Test Format
+### Live External Provider E2E Test
 
-Use this exact format once real tokens are available. This is the discovery anchor for future agents: live E2E testing with real tokens is manual curl-based, while CI uses mocked integration tests.
+Use this exact format once real tokens are available. This is the discovery anchor for future agents: `test_live_external_provider_full_api_e2e` is the one live external-provider E2E. It invokes backend APIs and uses real OpenAI transcription, real Google Calendar read/write, and live TinyFish or Exa research. CI should not run it because it spends external API quota and writes temporary events to the demo calendar.
 
 Required live env:
 
 ```bash
-export API_WRITE_KEY=demo-write-key
-export API_READ_KEY=demo-read-key
 export OPENAI_API_KEY=sk-...
 export GOOGLE_CALENDAR_ACCESS_TOKEN=ya29...
 export GOOGLE_CALENDAR_ID=primary
+export TINYFISH_API_KEY=sk-...
+# or: export EXA_API_KEY=...
+export RUN_LIVE_EXTERNAL_E2E=1
 ```
 
-Start the backend:
+Optional:
 
 ```bash
-make backend
+export LIVE_EXTERNAL_E2E_AUDIO_PATH=/absolute/path/to/demo.wav
+export LIVE_EXTERNAL_E2E_CLEANUP_CALENDAR=1
 ```
 
-Health check:
+If `LIVE_EXTERNAL_E2E_AUDIO_PATH` is not set, the test creates audio from this realistic caregiver script using macOS `say` and `afconvert`:
+
+```text
+Mom needs Panadol before lunch every day. Mom has a doctor appointment on June first twenty twenty six at ten AM. Doctor said Mom may need wheelchair support, find Singapore wheelchair grants.
+```
+
+Run only this live E2E:
 
 ```bash
-curl -s http://127.0.0.1:8000/health | jq
+make live-external-e2e
 ```
 
 Expected:
 
-```json
-{
-  "ok": true,
-  "service": "Caregiver Companion API"
-}
-```
-
-Verify Google Calendar read access through the backend:
-
-```bash
-curl -s -X POST http://127.0.0.1:8000/scheduler/next-day-check \
-  -H "X-API-Key: $API_WRITE_KEY" | jq
-```
-
-Expected:
-
-- `calendar_event_count` is `0` or more.
-- No `write_failed` notification appears just from this read check.
-- If the demo calendar has a busy event tomorrow, the count should reflect it.
+- `POST /transcriptions` uses real OpenAI audio transcription.
+- `POST /transcriptions/{session_id}/process` creates all three buckets.
+- `POST /appointments/{appointment_id}/approve-calendar-write` writes a real Google Calendar event.
+- `POST /scheduler/next-day-check` reads the demo Google Calendar and detects a conflict against a temporary busy event.
+- `POST /research/tasks/{task_id}/run` returns recommendation evidence from at least one non-curated live provider.
+- Temporary Google Calendar events are deleted by default unless `LIVE_EXTERNAL_E2E_CLEANUP_CALENDAR=0`.
 
 Optional direct Google token check:
 

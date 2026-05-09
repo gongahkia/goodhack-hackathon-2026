@@ -6,7 +6,7 @@ BACKEND_PY := $(BACKEND_VENV)/bin/python
 BACKEND_UVICORN := $(BACKEND_VENV)/bin/uvicorn
 BACKEND_PYTEST := $(BACKEND_VENV)/bin/pytest
 
-.PHONY: help install install-backend backend test test-backend robustness-loop clean
+.PHONY: help install install-backend backend test test-backend live-external-e2e robustness-loop clean
 
 help:
 	@echo "Caregiver Companion commands"
@@ -14,6 +14,7 @@ help:
 	@echo "  make install          Install backend dependencies"
 	@echo "  make backend          Run FastAPI on http://127.0.0.1:8000"
 	@echo "  make test             Run backend tests"
+	@echo "  make live-external-e2e Run opt-in live external-provider E2E"
 	@echo "  make robustness-loop  Run bounded frontend-readiness robustness checks"
 	@echo "  make clean            Remove local build/cache artifacts"
 
@@ -30,6 +31,9 @@ test: test-backend
 
 test-backend:
 	cd $(BACKEND_DIR) && . .venv/bin/activate && pytest -q
+
+live-external-e2e:
+	cd $(BACKEND_DIR) && . .venv/bin/activate && RUN_LIVE_EXTERNAL_E2E=1 pytest tests/test_live_integrations.py::test_live_external_provider_full_api_e2e -q -s
 
 robustness-loop:
 	cd $(BACKEND_DIR) && . .venv/bin/activate && python scripts/ralph_loop.py --max-iterations 1

@@ -91,6 +91,7 @@ create table if not exists edges (
 );
 
 alter table nodes drop constraint if exists nodes_type_check;
+delete from nodes where type = 'nehr_record';
 alter table nodes add constraint nodes_type_check check (type in (
   'inferred_condition',
   'scheduled_action',
