@@ -19,7 +19,10 @@ class Settings(BaseSettings):
     sealion_model: str = "aisingapore/Gemma-SEA-LION-v4-27B-IT"
     sealion_guard_model: str = "aisingapore/SEA-Guard"
     transcription_provider: str = "local"
+    local_transcription_backend: str = "auto"
     mlx_whisper_model: str = "mlx-community/whisper-large-v3-turbo-q4"
+    faster_whisper_model: str = "small.en"
+    faster_whisper_compute_type: str = "int8"
     groq_api_key: str | None = None
     groq_transcription_model: str = "whisper-large-v3-turbo"
     transcription_language: str = "en"

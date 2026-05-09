@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -59,7 +60,7 @@ async def transcribe_audio(audio: bytes, content_type: str | None, settings: Set
     errors: list[str] = []
     if provider in {"local", "auto", "mlx", "mlx-whisper"}:
         try:
-            return await _transcribe_with_mlx_whisper(audio, content_type, settings)
+            return await _transcribe_locally(audio, content_type, settings)
         except TranscriptionUnavailable as exc:
             errors.append(str(exc))
             if provider not in {"auto"}:
@@ -77,6 +78,27 @@ async def transcribe_audio(audio: bytes, content_type: str | None, settings: Set
     )
 
 
+async def _transcribe_locally(audio: bytes, content_type: str | None, settings: Settings) -> TranscriptionResult:
+    backend = settings.local_transcription_backend.lower().strip()
+    errors: list[str] = []
+    if backend in {"auto", "mlx", "mlx-whisper"}:
+        try:
+            return await _transcribe_with_mlx_whisper(audio, content_type, settings)
+        except TranscriptionUnavailable as exc:
+            errors.append(str(exc))
+            if backend != "auto":
+                raise
+    if backend in {"auto", "faster", "faster-whisper", "cpu"}:
+        try:
+            return await _transcribe_with_faster_whisper(audio, content_type, settings)
+        except TranscriptionUnavailable as exc:
+            errors.append(str(exc))
+            raise TranscriptionUnavailable(" ".join(errors) if errors else str(exc)) from exc
+    raise TranscriptionUnavailable(
+        f"Unknown local transcription backend '{settings.local_transcription_backend}'. Use 'auto', 'mlx-whisper', or 'faster-whisper'."
+    )
+
+
 async def _transcribe_with_mlx_whisper(audio: bytes, content_type: str | None, settings: Settings) -> TranscriptionResult:
     return await asyncio.to_thread(_run_mlx_whisper, audio, content_type, settings)
 
@@ -84,8 +106,8 @@ async def _transcribe_with_mlx_whisper(audio: bytes, content_type: str | None, s
 def _run_mlx_whisper(audio: bytes, content_type: str | None, settings: Settings) -> TranscriptionResult:
     try:
         import mlx_whisper
-    except ImportError as exc:
-        raise TranscriptionUnavailable("Local transcription requires mlx-whisper. Run: cd backend && uv pip install mlx-whisper") from exc
+    except Exception as exc:
+        raise TranscriptionUnavailable("MLX Whisper is unavailable in this runtime. Falling back to CPU local transcription when configured.") from exc
 
     suffix = _suffix_for_content_type(content_type)
     temp_path: Path | None = None
@@ -114,6 +136,52 @@ def _run_mlx_whisper(audio: bytes, content_type: str | None, settings: Settings)
         model=settings.mlx_whisper_model,
         language=settings.transcription_language or None,
     )
+
+
+async def _transcribe_with_faster_whisper(audio: bytes, content_type: str | None, settings: Settings) -> TranscriptionResult:
+    return await asyncio.to_thread(_run_faster_whisper, audio, content_type, settings)
+
+
+def _run_faster_whisper(audio: bytes, content_type: str | None, settings: Settings) -> TranscriptionResult:
+    try:
+        model = _faster_whisper_model(settings.faster_whisper_model, settings.faster_whisper_compute_type)
+    except Exception as exc:
+        raise TranscriptionUnavailable("CPU local transcription requires faster-whisper. Run: cd backend && uv pip install faster-whisper") from exc
+
+    suffix = _suffix_for_content_type(content_type)
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as audio_file:
+            audio_file.write(audio)
+            temp_path = Path(audio_file.name)
+        segments, _info = model.transcribe(
+            str(temp_path),
+            language=settings.transcription_language or None,
+            beam_size=5,
+            vad_filter=True,
+        )
+        text = " ".join(segment.text.strip() for segment in segments).strip()
+    except Exception as exc:
+        raise TranscriptionUnavailable(f"faster-whisper transcription failed: {exc}") from exc
+    finally:
+        if temp_path:
+            temp_path.unlink(missing_ok=True)
+
+    if not text:
+        raise TranscriptionInputError("No speech was detected in the audio.")
+    return TranscriptionResult(
+        text=text,
+        provider="faster-whisper",
+        model=settings.faster_whisper_model,
+        language=settings.transcription_language or None,
+    )
+
+
+@lru_cache(maxsize=2)
+def _faster_whisper_model(model_name: str, compute_type: str):
+    from faster_whisper import WhisperModel
+
+    return WhisperModel(model_name, device="cpu", compute_type=compute_type)
 
 
 async def _transcribe_with_groq(audio: bytes, content_type: str | None, settings: Settings) -> TranscriptionResult:
