@@ -277,6 +277,9 @@ def _extract_time_expressions(text: str, today: date) -> list[ExtractedTimeExpre
     for match in re.finditer(r"\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\b", text, re.IGNORECASE):
         normalized = _normalize_day_month(match.group(1), match.group(2), today)
         expressions.append(ExtractedTimeExpression(raw_text=match.group(0), normalized_date=normalized, confidence=0.8))
+    for match in re.finditer(r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b", text, re.IGNORECASE):
+        normalized = _normalize_month_day(match.group(1), match.group(2), match.group(3), today)
+        expressions.append(ExtractedTimeExpression(raw_text=match.group(0), normalized_date=normalized, confidence=0.85 if match.group(3) else 0.8))
     for match in re.finditer(r"\b(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", text, re.IGNORECASE):
         expressions.append(ExtractedTimeExpression(raw_text=match.group(0), normalized_time_window=_normalize_time(match), confidence=0.85))
     return expressions
@@ -464,6 +467,15 @@ def _normalize_day_month(day: str, month: str, today: date) -> str:
     month_num = datetime.strptime(month[:3].title(), "%b").month
     candidate = date(today.year, month_num, int(day))
     if candidate < today:
+        candidate = date(today.year + 1, month_num, int(day))
+    return candidate.isoformat()
+
+
+def _normalize_month_day(month: str, day: str, year: str | None, today: date) -> str:
+    month_num = datetime.strptime(month[:3].title(), "%b").month
+    candidate_year = int(year) if year else today.year
+    candidate = date(candidate_year, month_num, int(day))
+    if not year and candidate < today:
         candidate = date(today.year + 1, month_num, int(day))
     return candidate.isoformat()
 

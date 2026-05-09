@@ -4,6 +4,10 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+
+
 class Settings(BaseSettings):
     app_name: str = "Caregiver Companion API"
     database_url: str | None = None
@@ -42,7 +46,7 @@ class Settings(BaseSettings):
     google_calendar_access_token: str | None = None
     google_calendar_api_base_url: str = "https://www.googleapis.com/calendar/v3"
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=(REPO_ROOT / ".env", BACKEND_ROOT / ".env"), env_file_encoding="utf-8")
 
     @property
     def repo_root(self) -> Path:
