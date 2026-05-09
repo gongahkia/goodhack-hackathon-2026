@@ -46,7 +46,7 @@
 
 Caregiver Companion is a mobile-first web application for family caregivers of elderly Singaporeans. It turns connected health records into a traceable care calendar, links every action back to its source record, and surfaces preemptive care tasks such as grant applications before they become urgent.
 
-The current repository implements the v1 hackathon MVP described in [ROADMAP.md](ROADMAP.md): one caregiver-patient pair, synthetic NEHR-style records, a Postgres knowledge graph, an OpenAI Responses API tool loop, and a responsive Next.js interface.
+The current repository implements the v1 hackathon MVP described in [ROADMAP.md](ROADMAP.md), plus an initial v2 foundation: caregiver-feedback memory, readable reasoning narratives, care-plan review summaries, and standards-based calendar export.
 
 ## 🔮 Features
 
@@ -73,7 +73,14 @@ The current repository implements the v1 hackathon MVP described in [ROADMAP.md]
   * No live YouTube search for media
 * Caregiver controls
   * Approve, dismiss, and edit pending actions
-  * Feedback stored as graph state for future roadmap work
+  * Feedback stored as graph state and summarized into learned caregiver memory signals
+* v2 care intelligence foundations
+  * `/memory` summarizes approve/dismiss/edit patterns by action type
+  * `/care-plan/review` provides a nightly-style care-plan review narrative
+  * Event detail renders readable reasoning narratives, not only raw logs
+  * `.ics` calendar export and subscription feed for external calendar apps
+  * `/resources/search` and `/grants/search` return allowlisted, verified resources with curated fallback when live search is unavailable
+  * Caregiver memory signals are passed back into future reasoning so low-risk suggestions can be down-ranked without suppressing high-priority care actions
 * Language support
   * English, Bahasa Melayu, Chinese, and Tamil UI language packs
   * Persisted language selection in Settings
@@ -113,7 +120,7 @@ See [ROADMAP.md](ROADMAP.md).
 In brief:
 
 * v1: single-patient, traceable, reactive care planning MVP
-* v2: memory from caregiver feedback, scheduled re-reasoning, deeper evaluation
+* v2: memory from caregiver feedback, scheduled re-reasoning summaries, calendar export, allowlisted live content, deeper evaluation
 * v3: continuous monitoring, multilingual voice, domestic-helper mode
 * v4+: real NEHR partnerships, B2B2C distribution, regional expansion
 
@@ -214,6 +221,7 @@ Backend tests cover:
 * v1 care plan generation
 * scheduled-action provenance enforcement
 * bidirectional trace helpers
+* v2 memory summaries, memory-conditioned reasoning, care-plan review, verified search, and `.ics` export generation
 
 Frontend build checks:
 

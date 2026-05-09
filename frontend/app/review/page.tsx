@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, ExternalLink, ThumbsDown, ThumbsUp } from "lucide-react";
+import { ArrowRight, ExternalLink, Minus, Plus, Sparkles, ThumbsDown, ThumbsUp } from "lucide-react";
+import { clsx } from "clsx";
 import { AppHeader } from "@/components/app-header";
 import { BottomNav } from "@/components/bottom-nav";
 import { useNotifications } from "@/components/notifications-provider";
@@ -19,6 +20,7 @@ export default function ReviewPage() {
   const { t, dateLocale } = useI18n();
   const { notify, refreshNotifications } = useNotifications();
   const [events, setEvents] = useState<ReviewEvent[]>([]);
+  const [feedback, setFeedback] = useState<Record<string, { score: number; steer: string; note: string }>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,16 +50,29 @@ export default function ReviewPage() {
     [events]
   );
 
+  function eventFeedback(eventId: string) {
+    return feedback[eventId] || { score: 3, steer: "same", note: "" };
+  }
+
+  function updateFeedback(eventId: string, patch: Partial<{ score: number; steer: string; note: string }>) {
+    setFeedback((current) => ({ ...current, [eventId]: { ...eventFeedback(eventId), ...patch } }));
+  }
+
   async function setStatus(event: KgNode, status: "approved" | "dismissed") {
     setBusy(`${event.id}:${status}`);
     setError(null);
+    const currentFeedback = eventFeedback(event.id);
     try {
-      const updated = await api.status(event.id, status);
+      const updated = await api.status(event.id, status, {
+        usefulness_score: currentFeedback.score,
+        steer: currentFeedback.steer === "same" ? undefined : currentFeedback.steer,
+        feedback_note: currentFeedback.note || undefined
+      });
       await load();
       await refreshNotifications({ suppressToasts: true });
       notify({
         title: t("notifications.statusSaved"),
-        body: updated.payload.title || event.payload.title,
+        body: `${updated.payload.title || event.payload.title} · ${t("review.feedbackSaved")}`,
         kind: status,
         href: `/event/${event.id}`
       });
@@ -85,6 +100,60 @@ export default function ReviewPage() {
               <StatusBadge status={event.status} />
             </div>
             <p className="mt-3 text-sm text-[#34423a]">{event.payload.description}</p>
+            <div className="mt-4 rounded-lg border border-[#dfe8e2] bg-[#f5f8f6] p-3">
+              <p className="inline-flex items-center gap-2 text-sm font-bold text-ink">
+                <Sparkles className="h-4 w-4 text-moss" /> {t("review.scoreTitle")}
+              </p>
+              <div className="mt-3 grid grid-cols-5 gap-1">
+                {[1, 2, 3, 4, 5].map((score) => {
+                  const active = eventFeedback(event.id).score === score;
+                  return (
+                    <button
+                      aria-pressed={active}
+                      className={clsx(
+                        "min-h-9 rounded-md border text-sm font-bold",
+                        active ? "border-moss bg-moss text-white" : "border-[#cbd8cf] bg-white text-[#536159]"
+                      )}
+                      key={score}
+                      onClick={() => updateFeedback(event.id, { score })}
+                      type="button"
+                    >
+                      {score}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                {[
+                  { key: "more", label: t("review.steerMore"), icon: Plus },
+                  { key: "less", label: t("review.steerLess"), icon: Minus },
+                  { key: "simpler", label: t("review.steerSimpler"), icon: Sparkles }
+                ].map((item) => {
+                  const active = eventFeedback(event.id).steer === item.key;
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      aria-pressed={active}
+                      className={clsx(
+                        "inline-flex min-h-10 items-center justify-center gap-1 rounded-lg border px-2 text-xs font-bold",
+                        active ? "border-moss bg-mint text-moss" : "border-[#cbd8cf] bg-white text-[#536159]"
+                      )}
+                      key={item.key}
+                      onClick={() => updateFeedback(event.id, { steer: active ? "same" : item.key })}
+                      type="button"
+                    >
+                      <Icon className="h-3.5 w-3.5" /> {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <textarea
+                className="mt-3 min-h-16 w-full rounded-lg border border-[#cbd8cf] bg-white px-3 py-2 text-sm text-ink"
+                onChange={(changeEvent) => updateFeedback(event.id, { note: changeEvent.target.value })}
+                placeholder={t("review.feedbackPlaceholder")}
+                value={eventFeedback(event.id).note}
+              />
+            </div>
             {grantApplyUrl(event) ? (
               <a
                 className="mt-4 inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-moss px-3 py-2 text-sm font-semibold text-white"

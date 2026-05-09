@@ -73,6 +73,9 @@ class PatientSummary(BaseModel):
 
 class StatusUpdate(BaseModel):
     status: NodeStatus
+    usefulness_score: int | None = Field(default=None, ge=1, le=5)
+    feedback_note: str | None = None
+    steer: str | None = None
 
 
 class NodeEdit(BaseModel):

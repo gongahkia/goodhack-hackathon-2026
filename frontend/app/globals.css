@@ -3,16 +3,53 @@
 @tailwind utilities;
 
 :root {
+  --color-ink: 23 32 28;
+  --color-moss: 64 91 72;
+  --color-mint: 217 242 226;
+  --color-sun: 244 201 93;
+  --color-clay: 182 101 75;
+  --app-page: #eef3ef;
+  --app-page-glow: rgba(217, 242, 226, 0.8);
+  --app-shell: #fbfdfb;
+  --app-surface: #ffffff;
+  --app-surface-muted: #f5f8f6;
+  --app-border: #dfe8e2;
+  --app-text-muted: #536159;
+  --app-text-soft: #66726a;
+  --app-shadow: 0 20px 60px rgba(23, 32, 28, 0.16);
   color-scheme: light;
   background: #eef3ef;
 }
 
+[data-theme="dark"] {
+  --color-ink: 238 246 240;
+  --color-moss: 142 213 166;
+  --color-mint: 31 61 44;
+  --color-sun: 244 201 93;
+  --color-clay: 226 139 110;
+  --app-page: #07100c;
+  --app-page-glow: rgba(33, 67, 48, 0.45);
+  --app-shell: #101713;
+  --app-surface: #151d19;
+  --app-surface-muted: #1d2923;
+  --app-border: #2b3b32;
+  --app-text-muted: #b7c4bc;
+  --app-text-soft: #9ca9a1;
+  --app-shadow: 0 20px 60px rgba(0, 0, 0, 0.42);
+  color-scheme: dark;
+}
+
 body {
   margin: 0;
-  color: #17201c;
+  color: rgb(var(--color-ink));
   background:
-    linear-gradient(180deg, rgba(217, 242, 226, 0.8), rgba(238, 243, 239, 0.9)),
-    #eef3ef;
+    linear-gradient(180deg, var(--app-page-glow), var(--app-page)),
+    var(--app-page);
+}
+
+.app-shell {
+  background: var(--app-shell);
+  box-shadow: var(--app-shadow);
 }
 
 button,
@@ -22,12 +59,56 @@ textarea {
   letter-spacing: 0;
 }
 
+[data-theme="dark"] .bg-white {
+  background-color: var(--app-surface);
+}
+
+[data-theme="dark"] .bg-\[\#f5f8f6\],
+[data-theme="dark"] .bg-\[\#eef3ef\] {
+  background-color: var(--app-surface-muted);
+}
+
+[data-theme="dark"] .border-\[\#dfe8e2\],
+[data-theme="dark"] .border-\[\#dde5df\],
+[data-theme="dark"] .border-\[\#e7ede9\],
+[data-theme="dark"] .border-\[\#cbd8cf\] {
+  border-color: var(--app-border);
+}
+
+[data-theme="dark"] .text-\[\#34423a\],
+[data-theme="dark"] .text-\[\#536159\],
+[data-theme="dark"] .text-\[\#66726a\],
+[data-theme="dark"] .text-\[\#6c756f\],
+[data-theme="dark"] .text-\[\#7b837e\] {
+  color: var(--app-text-muted);
+}
+
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+  background-color: var(--app-surface);
+  border-color: var(--app-border);
+  color: rgb(var(--color-ink));
+}
+
+[data-theme="dark"] .shadow-app {
+  box-shadow: var(--app-shadow);
+}
+
 .fc {
   --fc-border-color: #d7dfd9;
   --fc-today-bg-color: #fff7db;
   --fc-event-bg-color: #405b48;
   --fc-event-border-color: #405b48;
   font-size: 0.78rem;
+}
+
+[data-theme="dark"] .fc {
+  --fc-border-color: #2b3b32;
+  --fc-today-bg-color: #3d321b;
+  --fc-page-bg-color: var(--app-surface);
+  --fc-neutral-bg-color: var(--app-surface-muted);
+  --fc-list-event-hover-bg-color: var(--app-surface-muted);
 }
 
 .fc .fc-toolbar {
@@ -39,14 +120,14 @@ textarea {
 .fc .fc-toolbar-title {
   font-size: 1rem;
   font-weight: 700;
-  color: #17201c;
+  color: rgb(var(--color-ink));
 }
 
 .fc .fc-button {
-  background: #f5f8f6;
-  border-color: #d7dfd9;
+  background: var(--app-surface-muted);
+  border-color: var(--app-border);
   border-radius: 8px;
-  color: #405b48;
+  color: rgb(var(--color-moss));
   padding: 0.35rem 0.55rem;
   font-size: 0.75rem;
   font-weight: 700;
@@ -62,14 +143,14 @@ textarea {
 }
 
 .fc .fc-col-header-cell-cushion {
-  color: #66726a;
+  color: var(--app-text-soft);
   font-size: 0.68rem;
   font-weight: 800;
   text-transform: uppercase;
 }
 
 .fc .fc-daygrid-day-number {
-  color: #536159;
+  color: var(--app-text-muted);
   font-size: 0.72rem;
   font-weight: 700;
   padding: 0.25rem 0.35rem;
@@ -103,7 +184,7 @@ textarea {
 }
 
 .fc .fc-more-link {
-  color: #405b48;
+  color: rgb(var(--color-moss));
   font-size: 0.68rem;
   font-weight: 800;
 }

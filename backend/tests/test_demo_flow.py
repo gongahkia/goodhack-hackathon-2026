@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -8,6 +10,7 @@ from app.demo import PATIENT_ID, ingest_trigger_records, seed_baseline
 from app.graph_queries import backtrace_sources, forward_actions
 from app.notifications import build_notifications
 from app.store import MemoryGraphStore
+from app.v2 import build_calendar_ics, build_care_plan_review, build_memory_profile, search_verified_grants, search_verified_resources, verify_live_result
 
 
 @pytest.mark.asyncio
@@ -33,6 +36,23 @@ async def test_demo_flow_creates_grounded_actions():
 
     grant_tasks = [action for action in actions if "Seniors' Mobility" in action.payload["title"]]
     assert len(grant_tasks) == 1
+
+
+@pytest.mark.asyncio
+async def test_golden_parkinsons_schedule_expectations():
+    fixture = json.loads((Path(__file__).parent / "golden" / "parkinsons_expected_schedule.json").read_text())
+    store = MemoryGraphStore()
+    await store.init()
+    await seed_baseline(store)
+    trigger = await ingest_trigger_records(store)
+    await run_agent_for_trigger(store, Settings(demo_agent_mode="scripted"), PATIENT_ID, trigger["node_ids"][0])
+
+    actions = await store.list_nodes(PATIENT_ID, ["scheduled_action"])
+    titles = {action.payload["title"] for action in actions}
+    action_types = {action.payload["action_type"] for action in actions}
+
+    assert set(fixture["expected_action_types"]) <= action_types
+    assert set(fixture["must_include_titles"]) <= titles
 
 
 @pytest.mark.asyncio
@@ -81,7 +101,7 @@ async def test_notifications_include_pending_and_dismissed_care_actions():
     await store.update_node_status(action.id, "dismissed")
     feedback = await store.create_node(
         "caregiver_feedback",
-        {"patient_id": PATIENT_ID, "target_node_id": str(action.id), "status": "dismissed"},
+        {"patient_id": PATIENT_ID, "target_node_id": str(action.id), "status": "dismissed", "usefulness_score": 1, "steer": "less"},
         "user",
         status="approved",
     )
@@ -91,3 +111,87 @@ async def test_notifications_include_pending_and_dismissed_care_actions():
 
     assert any(item["kind"] == "review" for item in notifications)
     assert any(item["kind"] == "dismissed" and item["source_node_id"] == str(action.id) for item in notifications)
+
+
+@pytest.mark.asyncio
+async def test_v2_memory_profile_learns_from_feedback():
+    store = MemoryGraphStore()
+    await store.init()
+    await seed_baseline(store)
+    trigger = await ingest_trigger_records(store)
+    await run_agent_for_trigger(store, Settings(demo_agent_mode="scripted"), PATIENT_ID, trigger["node_ids"][0])
+
+    action = next(node for node in await store.list_nodes(PATIENT_ID, ["scheduled_action"]) if node.payload["action_type"] == "therapy")
+    await store.update_node_status(action.id, "dismissed")
+    feedback = await store.create_node(
+        "caregiver_feedback",
+        {"patient_id": PATIENT_ID, "target_node_id": str(action.id), "status": "dismissed", "usefulness_score": 1, "steer": "less"},
+        "user",
+        status="approved",
+    )
+    await store.create_edge(feedback.id, action.id, "feedback_on")
+
+    profile = build_memory_profile(await store.graph_subset(PATIENT_ID))
+
+    assert profile["feedback_count"] == 1
+    assert profile["by_action_type"]["therapy"]["dismissed"] == 1
+    assert profile["average_scores"]["therapy"] == 1
+    assert any(item["kind"] == "downrank" for item in profile["learned_preferences"])
+    assert any(item["kind"] == "steer_less" for item in profile["learned_preferences"])
+
+
+@pytest.mark.asyncio
+async def test_v2_care_plan_review_and_calendar_export():
+    store = MemoryGraphStore()
+    await store.init()
+    await seed_baseline(store)
+    trigger = await ingest_trigger_records(store)
+    await run_agent_for_trigger(store, Settings(demo_agent_mode="scripted"), PATIENT_ID, trigger["node_ids"][0])
+
+    graph = await store.graph_subset(PATIENT_ID)
+    review = build_care_plan_review(graph, await store.list_reasoning_logs())
+    calendar = build_calendar_ics(await store.list_nodes(PATIENT_ID, ["scheduled_action"]), "Test Care Plan")
+
+    assert review["record_count"] >= 1
+    assert review["narrative"]
+    assert "BEGIN:VCALENDAR" in calendar
+    assert "BEGIN:VEVENT" in calendar
+    assert "Daily seated Parkinson's exercise".replace("'", "\\'") not in calendar
+    assert "Daily seated Parkinson's exercise" in calendar
+
+
+@pytest.mark.asyncio
+async def test_v2_memory_conditions_scripted_reasoning():
+    store = MemoryGraphStore()
+    await store.init()
+    await seed_baseline(store)
+    previous_action = await store.create_node(
+        "scheduled_action",
+        {"patient_id": PATIENT_ID, "title": "Prior therapy prompt", "action_type": "therapy"},
+        "agent",
+    )
+    feedback = await store.create_node(
+        "caregiver_feedback",
+        {"patient_id": PATIENT_ID, "target_node_id": str(previous_action.id), "status": "dismissed"},
+        "user",
+        status="approved",
+    )
+    await store.create_edge(feedback.id, previous_action.id, "feedback_on")
+    trigger = await ingest_trigger_records(store)
+
+    await run_agent_for_trigger(store, Settings(demo_agent_mode="scripted"), PATIENT_ID, trigger["node_ids"][0])
+
+    actions = await store.list_nodes(PATIENT_ID, ["scheduled_action"])
+    assert any(action.payload.get("title") == "Optional seated Parkinson's exercise" for action in actions)
+
+
+@pytest.mark.asyncio
+async def test_v2_verified_search_uses_allowlist_and_curated_fallback():
+    rejected = verify_live_result({"title": "Bad source", "url": "https://example.com/item", "snippet": "Nope"})
+    resources = await search_verified_resources("parkinson exercise", Settings(demo_agent_mode="scripted"))
+    grants = await search_verified_grants("mobility parkinson", Settings(demo_agent_mode="scripted"))
+
+    assert rejected["verification_status"] == "reject"
+    assert resources
+    assert all(item["verification_status"] == "safe_to_show" for item in resources)
+    assert any("Seniors' Mobility" in item["title"] for item in grants)

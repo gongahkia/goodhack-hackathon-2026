@@ -35,6 +35,9 @@ The North Star metric is **caregiver-hours saved per week** while maintaining or
 - **Reactive** processing only: when a new NEHR record is ingested, the agent re-reasons and updates the schedule.
 - Knowledge graph stored in Postgres (Supabase), adjacency-list representation.
 - Calendar UI (FullCalendar.js) showing medication schedule, therapy appointments, preemptive future tasks (e.g., "Apply for SMF grant" 6 months out).
+- **Daily / weekly task agenda view** alongside the calendar: tasks are grouped into flexible time blocks rather than strict minute-by-minute ordering. For example, a 10am-12pm block can contain 3 required tasks that the caregiver may reorder within the block, followed by a protected 12pm-6pm rest block, then a 6pm-10pm block for the remaining tasks. The view should support daily mode first, with weekly aggregation as the maximum horizon for routine caregiving tasks.
+- **Forecast view** for longer-horizon actions: segmented by grant, subsidy, equipment, and care-service applications the family may need to prepare for (e.g., hospice application, wheelchair grant, mobility aid subsidy, home modification support). Each forecast card opens into a timeline showing trigger, eligibility evidence, prep steps, documents needed, application window, and follow-up checkpoints.
+- **Appointment preparation prompts**: every agenda item that represents an appointment generates caregiver-facing talking points, including immediate symptoms/questions, medication or therapy adherence notes, and long-term concerns inferred from the patient's condition trajectory. These prompts remain linked to the source records and forecast items that produced them.
 - Click into any calendar event → see provenance chain back to the NEHR record(s) and the chain-of-thought that generated it.
 - Embedded media for ~10–15 curated, vetted videos mapped to common conditions (no live YouTube search in v1).
 - Curated grant database covering breadth of senior-relevant Singapore schemes (AIC SMF, Pioneer/Merdeka, MOH subsidies, SG Enable, CHAS, etc.) — shallow integration, deep enough for demo.
@@ -65,11 +68,12 @@ The North Star metric is **caregiver-hours saved per week** while maintaining or
 ### Demo flow (3-minute pitch)
 
 1. Show synthetic NEHR record for 78yo with early-stage Parkinson's just ingested.
-2. Calendar populates: medication schedule, physio appointments with embedded exercise videos, follow-up bookings.
-3. Scroll forward 6 months: a "Pending Review" task appears — *Apply for Seniors' Mobility and Enabling Fund.*
-4. Click the task → reasoning chain shown: NEHR diagnosis → condition trajectory → predicted mobility decline → matched grant.
-5. Click "Apply" → pre-filled handoff to AIC.
-6. Caregiver dismisses an unrelated suggestion → show that the dismissal is logged and will inform future suggestions (foreshadowing v2).
+2. Calendar and daily agenda populate: medication schedule, physio appointments with embedded exercise videos, follow-up bookings, and flexible time blocks that distinguish "do these tasks sometime in this window" from protected rest.
+3. Open an appointment → generated talking points appear, combining today's questions with longer-term concerns such as fall risk, mobility decline, caregiver fatigue, and likely future equipment needs.
+4. Switch to forecast view: grant and care-application cards appear for anticipated needs, such as wheelchair support or hospice planning.
+5. Open the Seniors' Mobility and Enabling Fund forecast → timeline shown: NEHR diagnosis → condition trajectory → predicted mobility decline → eligibility evidence → document prep → application checkpoint.
+6. Click "Apply" → pre-filled handoff to AIC.
+7. Caregiver dismisses an unrelated suggestion → show that the dismissal is logged and will inform future suggestions (foreshadowing v2).
 
 ---
 
@@ -82,7 +86,10 @@ The North Star metric is **caregiver-hours saved per week** while maintaining or
 - **Memory layer**: caregiver Approve/Dismiss/Edit signals now condition future reasoning. If a caregiver consistently dismisses dietary suggestions, the agent down-weights them. Stored as structured preferences + raw event log.
 - **Scheduled re-reasoning**: nightly job re-examines the full record set per patient and surfaces "what's changed, what should I anticipate?" updates, not just record-triggered updates.
 - **Calendar export and subscription integrations**: provide standards-based calendar export (`.ics`) and a stable subscription feed that external calendar apps can consume directly. Caregivers should be able to add the provisioned care schedule to Apple Calendar, Google Calendar, Outlook, and similar apps, with updates flowing from Caregiver Companion into their existing daily calendar workflow.
-- **Admin / clinician review interface**: a separate role can review AI-generated tasks before they reach the caregiver, for high-risk recommendations (e.g., medication-related, mobility/fall-risk, financial applications above a threshold). Reviewer's accept/reject also feeds memory.
+- **Agenda intelligence upgrades**: learn caregiver preferences for task ordering inside flexible blocks, protect rest blocks unless a task is clinically urgent, and explain why any task must happen at a specific time instead of being movable within the block.
+- **Forecast intelligence upgrades**: keep grant, hospice, equipment, respite-care, and home-modification timelines updated as records change; flag missing documents early; and surface conflicts between forecast deadlines and the caregiver's weekly capacity.
+- **Longitudinal appointment prep**: appointment talking points become a longitudinal brief that tracks recurring concerns, previously asked questions, unresolved clinician advice, and future risks that should be revisited at the next consultation.
+- **Caregiver review intelligence**: keep the existing caregiver Review tab as the main human-in-the-loop surface. Caregivers can approve/dismiss actions, rate usefulness, leave notes, and steer future suggestions toward "more", "less", or "simpler" recommendations. These signals feed memory and future reasoning.
 - **Proper evaluation harness**:
   - Golden test set of synthetic patient records with expected schedules.
   - Per-decision eval: was the provenance correct? Was the reasoning sound? Was the action appropriate?

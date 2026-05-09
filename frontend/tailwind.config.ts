@@ -5,11 +5,11 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#17201c",
-        moss: "#405b48",
-        mint: "#d9f2e2",
-        sun: "#f4c95d",
-        clay: "#b6654b"
+        ink: "rgb(var(--color-ink) / <alpha-value>)",
+        moss: "rgb(var(--color-moss) / <alpha-value>)",
+        mint: "rgb(var(--color-mint) / <alpha-value>)",
+        sun: "rgb(var(--color-sun) / <alpha-value>)",
+        clay: "rgb(var(--color-clay) / <alpha-value>)"
       },
       boxShadow: {
         app: "0 20px 60px rgba(23, 32, 28, 0.16)"

@@ -9,6 +9,12 @@ import { useI18n } from "@/lib/i18n";
 import type { AppNotification } from "@/lib/types";
 
 const STORAGE_KEY = "caregiver-companion-notifications";
+const PREFERENCES_KEY = "caregiver-companion-preferences";
+
+type AppPreferences = {
+  criticalAlerts: boolean;
+  notificationBadges: boolean;
+};
 
 type NotificationStore = {
   dismissed: Record<string, string>;
@@ -40,6 +46,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   const [dismissed, setDismissed] = useState<Record<string, string>>({});
   const [seen, setSeen] = useState<Record<string, string>>({});
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [preferences, setPreferences] = useState<AppPreferences>({ criticalAlerts: true, notificationBadges: true });
   const [hydrated, setHydrated] = useState(false);
   const initialFetchDone = useRef(false);
 
@@ -54,6 +61,33 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     } finally {
       setHydrated(true);
     }
+  }, []);
+
+  useEffect(() => {
+    function loadPreferences() {
+      const stored = window.localStorage.getItem(PREFERENCES_KEY);
+      if (!stored) {
+        setPreferences({ criticalAlerts: true, notificationBadges: true });
+        return;
+      }
+      try {
+        const parsed = JSON.parse(stored) as Partial<AppPreferences>;
+        setPreferences({
+          criticalAlerts: parsed.criticalAlerts !== false,
+          notificationBadges: parsed.notificationBadges !== false
+        });
+      } catch {
+        setPreferences({ criticalAlerts: true, notificationBadges: true });
+      }
+    }
+
+    loadPreferences();
+    window.addEventListener("storage", loadPreferences);
+    window.addEventListener("caregiver-companion-preferences-change", loadPreferences);
+    return () => {
+      window.removeEventListener("storage", loadPreferences);
+      window.removeEventListener("caregiver-companion-preferences-change", loadPreferences);
+    };
   }, []);
 
   useEffect(() => {
@@ -97,7 +131,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     if (newItems.length > 0) {
       if (!options?.suppressToasts) {
         const shouldToast = initialFetchDone.current ? newItems : newItems.slice(0, 2);
-        shouldToast.forEach(pushToast);
+        shouldToast.filter((item) => preferences.criticalAlerts || item.kind !== "review").forEach(pushToast);
       }
       const timestamp = new Date().toISOString();
       setSeen((current) => {
@@ -109,7 +143,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       });
     }
     initialFetchDone.current = true;
-  }, [dismissed, pushToast, seen]);
+  }, [dismissed, preferences.criticalAlerts, pushToast, seen]);
 
   useEffect(() => {
     if (!hydrated) {
@@ -137,7 +171,16 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   }, []);
 
   const value = useMemo<NotificationsContextValue>(() => {
-    const activeNotifications = notifications.filter((item) => !dismissed[item.id]);
+    const activeNotifications = notifications
+      .filter((item) => !dismissed[item.id])
+      .sort((a, b) => {
+        if (!preferences.criticalAlerts) {
+          return 0;
+        }
+        const aPriority = a.kind === "review" ? 0 : 1;
+        const bPriority = b.kind === "review" ? 0 : 1;
+        return aPriority - bPriority;
+      });
     const dismissedNotifications = notifications
       .filter((item) => dismissed[item.id])
       .map((item) => ({ ...item, dismissed_at: dismissed[item.id] }));
@@ -152,7 +195,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       notify: pushToast,
       refreshNotifications
     };
-  }, [dismissNotification, dismissed, notifications, pushToast, refreshNotifications, restoreNotification]);
+  }, [dismissNotification, dismissed, notifications, preferences.criticalAlerts, pushToast, refreshNotifications, restoreNotification]);
 
   return (
     <NotificationsContext.Provider value={value}>
@@ -173,6 +216,32 @@ export function useNotifications() {
 export function NotificationBell() {
   const { unreadCount } = useNotifications();
   const { t } = useI18n();
+  const [showBadge, setShowBadge] = useState(true);
+
+  useEffect(() => {
+    function loadPreference() {
+      const stored = window.localStorage.getItem(PREFERENCES_KEY);
+      if (!stored) {
+        setShowBadge(true);
+        return;
+      }
+      try {
+        const parsed = JSON.parse(stored) as { notificationBadges?: boolean };
+        setShowBadge(parsed.notificationBadges !== false);
+      } catch {
+        setShowBadge(true);
+      }
+    }
+
+    loadPreference();
+    window.addEventListener("storage", loadPreference);
+    window.addEventListener("caregiver-companion-preferences-change", loadPreference);
+    return () => {
+      window.removeEventListener("storage", loadPreference);
+      window.removeEventListener("caregiver-companion-preferences-change", loadPreference);
+    };
+  }, []);
+
   return (
     <Link
       href="/notifications"
@@ -180,7 +249,7 @@ export function NotificationBell() {
       aria-label={t("notifications.title")}
     >
       <Bell className="h-5 w-5" aria-hidden="true" />
-      {unreadCount > 0 ? (
+      {showBadge && unreadCount > 0 ? (
         <span className="absolute -right-1 -top-1 min-w-5 rounded-full bg-[#b6654b] px-1.5 py-0.5 text-center text-[10px] font-bold leading-none text-white">
           {unreadCount > 9 ? "9+" : unreadCount}
         </span>

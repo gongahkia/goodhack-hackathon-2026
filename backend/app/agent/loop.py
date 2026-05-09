@@ -12,6 +12,7 @@ from ..config import Settings
 from ..data import educational_resources, grants_database
 from ..demo import PATIENT
 from ..store import GraphStore
+from ..v2 import build_memory_profile, memory_instructions
 from .tools import AgentToolbox
 
 
@@ -44,8 +45,12 @@ You are operating in Singapore. Use Singapore healthcare context (polyclinics, N
 async def run_agent_for_trigger(store: GraphStore, settings: Settings, patient_id: str, trigger_node_id: str) -> dict[str, Any]:
     log = await store.create_reasoning_log(f"new_nehr_record:{trigger_node_id}")
     toolbox = AgentToolbox(store, settings, patient_id, log.id)
+    memory = build_memory_profile(await store.graph_subset(patient_id))
+    memory_notes = memory_instructions(memory)
+    if memory_notes:
+        await store.append_reasoning_step(log.id, {"kind": "memory", "text": " ".join(memory_notes)})
     if settings.use_scripted_agent:
-        conclusion = await run_scripted_demo_reasoner(store, toolbox, patient_id, UUID(trigger_node_id))
+        conclusion = await run_scripted_demo_reasoner(store, toolbox, patient_id, UUID(trigger_node_id), memory_notes)
         await store.finish_reasoning_log(log.id, conclusion)
         return {"reasoning_log_id": str(log.id), "conclusion": conclusion, "mode": "scripted"}
 
@@ -53,6 +58,7 @@ async def run_agent_for_trigger(store: GraphStore, settings: Settings, patient_i
     next_input: str | list[dict[str, Any]] = (
         f"Patient context: {PATIENT.model_dump(mode='json')}\n"
         f"Trigger node id: {trigger_node_id}\n"
+        f"Caregiver memory instructions: {memory_notes or ['No learned caregiver preferences yet.']}\n"
         "Reason over this new record and create the v1 caregiving graph updates."
     )
     previous_response_id: str | None = None
@@ -115,7 +121,7 @@ def _extract_response_text(message: Any) -> str:
     return "\n".join(chunks).strip()
 
 
-async def run_scripted_demo_reasoner(store: GraphStore, toolbox: AgentToolbox, patient_id: str, trigger_node_id: UUID) -> str:
+async def run_scripted_demo_reasoner(store: GraphStore, toolbox: AgentToolbox, patient_id: str, trigger_node_id: UUID, memory_notes: list[str] | None = None) -> str:
     graph = await store.graph_subset(patient_id)
     diagnosis = next((node for node in graph.nodes if node.id == trigger_node_id), None)
     if not diagnosis:
@@ -125,6 +131,7 @@ async def run_scripted_demo_reasoner(store: GraphStore, toolbox: AgentToolbox, p
     ]
     prescription = next((node for node in related_records if node.payload.get("record_type") == "prescription"), diagnosis)
     appointment = next((node for node in related_records if node.payload.get("record_type") == "appointment"), diagnosis)
+    therapy_downranked = any("low-risk therapy" in note or "therapy suggestions" in note for note in (memory_notes or []))
 
     await store.append_reasoning_step(
         toolbox.reasoning_log_id,
@@ -133,6 +140,14 @@ async def run_scripted_demo_reasoner(store: GraphStore, toolbox: AgentToolbox, p
             "text": "The new diagnosis identifies early-stage Parkinson's disease, so I will use the curated Parkinson's trajectory rather than inventing a progression.",
         },
     )
+    if memory_notes:
+        await store.append_reasoning_step(
+            toolbox.reasoning_log_id,
+            {
+                "kind": "memory",
+                "text": "I checked caregiver feedback memory before creating actions. " + " ".join(memory_notes),
+            },
+        )
     trajectory = await toolbox.get_condition_trajectory("parkinsons_early_stage")
     await store.append_reasoning_step(toolbox.reasoning_log_id, {"kind": "tool_call", "tool": "get_condition_trajectory", "input": {"condition_key": "parkinsons_early_stage"}})
     await store.append_reasoning_step(toolbox.reasoning_log_id, {"kind": "tool_result", "tool": "get_condition_trajectory", "result": trajectory})
@@ -176,8 +191,12 @@ async def run_scripted_demo_reasoner(store: GraphStore, toolbox: AgentToolbox, p
         diagnosis.id,
         {
             "patient_id": patient_id,
-            "title": "Daily seated Parkinson's exercise",
-            "description": "Start a short seated exercise routine to maintain mobility and confidence while symptoms are mild.",
+            "title": "Optional seated Parkinson's exercise" if therapy_downranked else "Daily seated Parkinson's exercise",
+            "description": (
+                "Optional low-risk movement prompt: keep this concise because the caregiver previously dismissed similar therapy suggestions."
+                if therapy_downranked
+                else "Start a short seated exercise routine to maintain mobility and confidence while symptoms are mild."
+            ),
             "action_type": "therapy",
             "start_at": (start + timedelta(hours=10)).isoformat(),
             "end_at": (start + timedelta(hours=10, minutes=20)).isoformat(),
@@ -235,6 +254,7 @@ async def run_scripted_demo_reasoner(store: GraphStore, toolbox: AgentToolbox, p
     return (
         "I matched the new neurology record to the curated early-stage Parkinson's trajectory and created grounded care actions for medication, daily exercise, and follow-up. "
         "I also added a 6-month AIC Seniors' Mobility and Enabling Fund checkpoint because the trajectory predicts mobility assessment needs at that milestone."
+        + (" I adjusted the low-risk therapy suggestion based on caregiver feedback memory." if therapy_downranked else "")
     )
 
 

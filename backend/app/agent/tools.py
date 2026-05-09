@@ -4,11 +4,10 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-import httpx
-
 from ..config import Settings
 from ..data import condition_trajectories, educational_resources, grants_database
 from ..store import GraphStore
+from ..v2 import search_verified_resources
 
 
 class AgentToolbox:
@@ -148,18 +147,7 @@ class AgentToolbox:
         return condition_trajectories().get(condition_key, {"error": f"Unknown trajectory: {condition_key}"})
 
     async def web_search(self, query: str, allowlist: list[str] | None = None) -> list[dict[str, Any]]:
-        domains = allowlist or ["gov.sg", "healthhub.sg", "aic.sg", "sgenable.sg", "moh.gov.sg"]
-        if self.settings.exa_api_key:
-            async with httpx.AsyncClient(timeout=8) as client:
-                response = await client.post(
-                    "https://api.exa.ai/search",
-                    headers={"x-api-key": self.settings.exa_api_key},
-                    json={"query": query, "includeDomains": domains, "numResults": 5},
-                )
-                response.raise_for_status()
-                data = response.json()
-            return [{"title": item.get("title"), "url": item.get("url"), "snippet": item.get("text", "")[:300]} for item in data.get("results", [])]
-        return [{"title": "Web search unavailable", "url": None, "snippet": "No Exa key configured; v1 demo uses curated data."}]
+        return await search_verified_resources(query, self.settings, allowlist)
 
     async def create_node(self, type: str, payload: dict[str, Any], status: str = "pending_review") -> dict[str, str]:
         payload = {"patient_id": self.patient_id, **payload}

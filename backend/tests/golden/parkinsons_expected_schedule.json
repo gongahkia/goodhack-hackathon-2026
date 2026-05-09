@@ -1,0 +1,11 @@
+{
+  "patient_id": "mdm-tan",
+  "trigger": "early_stage_parkinsons_diagnosis",
+  "expected_action_types": ["medication", "therapy", "appointment", "grant"],
+  "must_include_titles": [
+    "Levodopa after meals",
+    "Daily seated Parkinson's exercise",
+    "Neurologist follow-up",
+    "Apply for Seniors' Mobility and Enabling Fund"
+  ]
+}

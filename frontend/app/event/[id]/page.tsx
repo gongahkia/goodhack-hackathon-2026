@@ -182,12 +182,16 @@ export default function EventDetailPage({ params }: { params: { id: string } }) 
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-xs font-bold uppercase text-moss">{event.payload.action_type || t("event.careAction")}</p>
-                  <h1 className="mt-1 text-xl font-bold">{event.payload.title}</h1>
+                  <h1 className="mt-1 text-xl font-bold">
+                    <LinkedClinicalText text={event.payload.title} onReferenceClick={setActiveReference} />
+                  </h1>
                   <p className="mt-1 text-sm text-[#66726a]">{formatDate(event.payload.start_at, dateLocale)}</p>
                 </div>
                 <StatusBadge status={event.status} />
               </div>
-              <p className="mt-3 text-sm text-[#34423a]">{event.payload.description}</p>
+              <p className="mt-3 text-sm text-[#34423a]">
+                <LinkedClinicalText text={event.payload.description} onReferenceClick={setActiveReference} />
+              </p>
               {event.payload.recurrence ? <p className="mt-2 text-sm font-semibold text-moss">{event.payload.recurrence}</p> : null}
               {appointmentRescheduleUrl(event) ? (
                 <a
@@ -328,7 +332,13 @@ export default function EventDetailPage({ params }: { params: { id: string } }) 
             {event.reasoning_log ? (
               <section className="rounded-xl border border-[#dfe8e2] bg-white p-4">
                 <h2 className="font-bold">{t("event.reasoning")}</h2>
-                <p className="mt-2 text-sm text-[#34423a]">{event.reasoning_log.conclusion}</p>
+                <div className="mt-3 space-y-2">
+                  {(event.reasoning_narrative?.length ? event.reasoning_narrative : [event.reasoning_log.conclusion]).map((line, index) => (
+                    <p className="rounded-lg bg-[#f5f8f6] px-3 py-2 text-sm text-[#34423a]" key={index}>
+                      {line}
+                    </p>
+                  ))}
+                </div>
                 <Link href="/audit" className="mt-3 inline-flex text-sm font-semibold text-moss">
                   {t("event.viewReasoning")}
                 </Link>
@@ -350,7 +360,23 @@ function recordLabel(record: KgNode, locale: string) {
 function careReferencesForEvent(event: EventDetail, resource?: KgNode): CareReference[] {
   const actionType = event.payload.action_type;
   const title = String(event.payload.title || "").toLowerCase();
+  const description = String(event.payload.description || "").toLowerCase();
   const references: CareReference[] = [];
+
+  if (title.includes("parkinson") || description.includes("parkinson")) {
+    references.push({
+      id: "condition-parkinsons",
+      label: "Parkinson's reference",
+      definition:
+        "Parkinson's disease is a progressive movement condition that can affect tremor, stiffness, movement speed, walking, balance, and daily routines.",
+      purpose:
+        "For this care plan, Parkinson's is the clinical context that explains why medication timing, daily movement, falls monitoring, and neurology follow-up are being surfaced together.",
+      references: [
+        { title: "Parkinson's disease overview", source: "HealthHub", url: "https://www.healthhub.sg/" },
+        { title: "Understanding Parkinson's", source: "Parkinson's Foundation", url: "https://www.parkinson.org/understanding-parkinsons" }
+      ]
+    });
+  }
 
   if (actionType === "medication" || title.includes("levodopa")) {
     references.push({
@@ -385,6 +411,30 @@ function careReferencesForEvent(event: EventDetail, resource?: KgNode): CareRefe
   }
 
   return references;
+}
+
+function LinkedClinicalText({ text, onReferenceClick }: { text: string | undefined; onReferenceClick: (referenceId: string) => void }) {
+  const value = String(text || "");
+  const parts = value.split(/(Parkinson's|Parkinsons|Parkinson)/gi);
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (/^Parkinson'?s?$|^Parkinson$/i.test(part)) {
+          return (
+            <button
+              className="inline rounded-sm text-moss underline decoration-moss/40 underline-offset-2 hover:bg-mint/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-moss"
+              key={`${part}-${index}`}
+              onClick={() => onReferenceClick("condition-parkinsons")}
+              type="button"
+            >
+              {part}
+            </button>
+          );
+        }
+        return part;
+      })}
+    </>
+  );
 }
 
 function appointmentRescheduleUrl(event: EventDetail) {

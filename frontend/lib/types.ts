@@ -31,6 +31,39 @@ export type EventDetail = KgNode & {
   related_nodes: KgNode[];
   related_edges: KgEdge[];
   reasoning_log?: ReasoningLog | null;
+  reasoning_narrative?: string[];
+};
+
+export type MemoryProfile = {
+  feedback_count: number;
+  by_status: Record<string, number>;
+  by_action_type: Record<string, Record<string, number>>;
+  average_scores: Record<string, number>;
+  steering: Record<string, Record<string, number>>;
+  learned_preferences: Array<{ kind: string; action_type: string; reason: string }>;
+  recent_edits: Array<{ target_node_id: string; title?: string | null; fields: string[]; created_at: string }>;
+};
+
+export type VerifiedContent = {
+  title: string;
+  source: string;
+  url?: string | null;
+  snippet: string;
+  retrieved_at: string;
+  verification_status: "safe_to_show" | "needs_review" | "reject";
+  reason: string;
+};
+
+export type CarePlanReview = {
+  generated_at: string;
+  record_count: number;
+  condition_count: number;
+  pending_review_count: number;
+  upcoming_30_day_count: number;
+  next_actions: Array<{ id: string; title?: string; action_type?: string; start_at?: string; status: NodeStatus }>;
+  memory: MemoryProfile;
+  memory_instructions: string[];
+  narrative: string[];
 };
 
 export type PatientSummary = {

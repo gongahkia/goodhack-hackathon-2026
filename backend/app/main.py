@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from .agent.loop import run_agent_for_trigger
@@ -12,6 +12,7 @@ from .graph_queries import backtrace_sources, forward_actions
 from .models import NodeEdit, StatusUpdate
 from .notifications import build_notifications
 from .store import GraphStore, MemoryGraphStore, PostgresGraphStore
+from .v2 import build_calendar_ics, build_care_plan_review, build_memory_profile, event_reasoning_narrative, search_verified_grants, search_verified_resources
 
 settings = get_settings()
 store: GraphStore = (
@@ -114,7 +115,52 @@ async def event_detail(event_id: UUID) -> dict:
         "related_nodes": [item.model_dump(mode="json") for item in related_nodes],
         "related_edges": [edge.model_dump(mode="json") for edge in related_edges],
         "reasoning_log": log.model_dump(mode="json") if log else None,
+        "reasoning_narrative": event_reasoning_narrative(node, graph, log),
     }
+
+
+@app.get("/calendar.ics")
+async def calendar_export() -> Response:
+    nodes = await store.list_nodes(PATIENT_ID, ["scheduled_action"])
+    active = [node for node in nodes if node.status != "dismissed"]
+    return Response(
+        build_calendar_ics(active, f"{PATIENT.name} Care Plan"),
+        media_type="text/calendar; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="caregiver-companion-care-plan.ics"'},
+    )
+
+
+@app.get("/calendar/feed.ics")
+async def calendar_feed() -> Response:
+    nodes = await store.list_nodes(PATIENT_ID, ["scheduled_action"])
+    active = [node for node in nodes if node.status != "dismissed"]
+    return Response(
+        build_calendar_ics(active, f"{PATIENT.name} Care Plan"),
+        media_type="text/calendar; charset=utf-8",
+    )
+
+
+@app.get("/memory")
+async def memory_profile() -> dict:
+    return build_memory_profile(await store.graph_subset(PATIENT_ID))
+
+
+@app.get("/care-plan/review")
+async def care_plan_review() -> dict:
+    graph = await store.graph_subset(PATIENT_ID)
+    logs = await store.list_reasoning_logs()
+    return build_care_plan_review(graph, logs)
+
+
+@app.get("/resources/search")
+async def resource_search(topic: str, condition: str | None = None) -> list[dict]:
+    query = f"{topic} {condition or ''}".strip()
+    return await search_verified_resources(query, settings)
+
+
+@app.get("/grants/search")
+async def grant_search(condition: str) -> list[dict]:
+    return await search_verified_grants(condition, settings)
 
 
 @app.get("/notifications")
@@ -130,7 +176,14 @@ async def update_status(node_id: UUID, update: StatusUpdate) -> dict:
         raise HTTPException(404, "Node not found")
     feedback = await store.create_node(
         "caregiver_feedback",
-        {"patient_id": PATIENT_ID, "target_node_id": str(node_id), "status": update.status},
+        {
+            "patient_id": PATIENT_ID,
+            "target_node_id": str(node_id),
+            "status": update.status,
+            "usefulness_score": update.usefulness_score,
+            "feedback_note": update.feedback_note,
+            "steer": update.steer,
+        },
         "user",
         status="approved",
     )
