@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str | None = None
     openai_api_key: str | None = Field(default=None, repr=False)
-    openai_model: str = "gpt-5.5"
+    openai_model: str = "gpt-4o"
     exa_api_key: str | None = Field(default=None, repr=False)
     tinyfish_api_key: str | None = Field(default=None, repr=False)
     jina_api_key: str | None = Field(default=None, repr=False)
@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     openai_transcription_model: str = "gpt-4o-transcribe"
     local_transcription_backend: str = "auto"
     mlx_whisper_model: str = "mlx-community/whisper-large-v3-turbo-q4"
-    faster_whisper_model: str = "base.en"
+    faster_whisper_model: str = "base"
     faster_whisper_compute_type: str = "int8"
     groq_api_key: str | None = Field(default=None, repr=False)
     groq_transcription_model: str = "whisper-large-v3-turbo"
