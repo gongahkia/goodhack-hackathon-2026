@@ -413,7 +413,7 @@ Guardrail auditor:
 
 - approves, narrows, or blocks proposed research
 - prevents research that is speculative, irrelevant, unsafe, or based only on a simple daily task
-- enforces source allowlists
+- enforces source trust tiers and makes sure informal sources are labeled correctly
 - flags medical advice risk
 - flags unsupported grant eligibility claims
 - logs its decision before any external research tool is called
@@ -422,8 +422,10 @@ Research tools:
 
 - prefer existing curated grant/resource data first
 - use TinyFish and Exa for live research when freshness matters
-- restrict statutory-board and grant research to official or high-trust Singapore sources where possible
-- record source URLs, snippets, retrieval time, and verification status
+- use official and high-trust Singapore sources for verified statutory-board, grant, subsidy, eligibility, and application facts
+- allow broader discovery from news sites, Reddit, forums, blogs, and caregiver community posts when useful for surfacing lived-experience leads, practical tips, or questions worth checking
+- never treat Reddit, forums, blogs, or uncited news as authoritative evidence for eligibility, medical advice, or application requirements
+- record source URLs, snippets, retrieval time, source tier, and verification status
 
 Synthesis model:
 
@@ -432,10 +434,13 @@ Synthesis model:
 - avoids overclaiming eligibility
 - produces a strict API schema
 - links every recommendation to evidence
+- separates verified facts from informal leads so users can make the final decision with clear source context
 
-## Source Policy for Singapore Grants and Statutory Boards
+## Research Source Policy
 
-Preferred sources:
+Research should support agent-led discovery while making source quality visible to the user. The backend should not hide that different parts of a recommendation may come from different trust levels.
+
+Tier 1: verified official sources.
 
 - `gov.sg`
 - `moh.gov.sg`
@@ -446,6 +451,22 @@ Preferred sources:
 - `sgenable.sg`
 - other official Singapore public-sector or statutory-board domains if explicitly allowlisted
 
+Tier 2: high-trust reference sources.
+
+- recognized hospitals and healthcare institutions
+- established charities and caregiver support organizations
+- reputable clinical or public-health bodies
+- major Singapore news outlets when reporting policy changes or official announcements
+
+Tier 3: informal discovery sources.
+
+- Reddit discussions
+- caregiver forums
+- Facebook-style community posts if accessible through approved tooling
+- blogs and personal writeups
+- general news commentary
+- product reviews or marketplace discussions
+
 Existing repository grant/resource data should remain useful, but it should become curated fallback or seed data rather than the primary source of truth for time-sensitive policy facts.
 
 Recommended order:
@@ -453,10 +474,26 @@ Recommended order:
 ```text
 curated local data for known schemes
         +
-allowlisted live research for freshness
+verified official/high-trust live research for factual claims
+        +
+informal discovery sources for leads and lived-experience context
         |
         v
-synthesis with source freshness labels
+synthesis with source tier, freshness, and verification labels
+```
+
+User-facing research output should group claims by source status:
+
+- `verified_fact`: sourced from official or high-trust references
+- `needs_verification`: plausible but not yet confirmed by official sources
+- `community_tip`: surfaced from Reddit, forums, blogs, or informal posts
+- `rejected_or_unsafe`: blocked by the guardrail auditor
+
+Example user-facing phrasing:
+
+```text
+Verified: AIC lists mobility-aid support under the Seniors' Mobility and Enabling Fund.
+Community tip: Reddit/forum caregivers often suggest asking the hospital medical social worker about paperwork before buying equipment. This is not an official eligibility rule.
 ```
 
 ## Proposed Graph Node Types
