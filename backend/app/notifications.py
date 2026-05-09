@@ -73,6 +73,52 @@ def build_notifications(graph: GraphSubset, logs: list[ReasoningLog] | None = No
                 }
             )
             continue
+        if node.type == "daily_task":
+            if node.status == "pending_review":
+                items.append(
+                    {
+                        "id": f"daily-task:{node.id}:pending_review",
+                        "kind": "daily task review",
+                        "title": "Daily task needs review",
+                        "body": title,
+                        "created_at": node.created_at.isoformat(),
+                        "href": "/tasks/daily",
+                        "source_node_id": str(node.id),
+                        "node_status": node.status,
+                        "occurred_at": node.payload.get("scheduled_time") or node.payload.get("timing_relation"),
+                    }
+                )
+            elif node.status == "dismissed":
+                items.append(
+                    {
+                        "id": f"daily-task:{node.id}:dismissed",
+                        "kind": "dismissed",
+                        "title": "Daily task dismissed",
+                        "body": title,
+                        "created_at": node.created_at.isoformat(),
+                        "href": "/tasks/daily",
+                        "source_node_id": str(node.id),
+                        "node_status": node.status,
+                        "occurred_at": node.payload.get("scheduled_time") or node.payload.get("timing_relation"),
+                    }
+                )
+            continue
+        if node.type == "calendar_write_request":
+            if node.status == "clarification_required" or node.payload.get("status") == "write_failed":
+                items.append(
+                    {
+                        "id": f"calendar-write:{node.id}:write_failed",
+                        "kind": "calendar write failed",
+                        "title": "Calendar write needs attention",
+                        "body": node.payload.get("error") or "The calendar write could not be completed.",
+                        "created_at": node.created_at.isoformat(),
+                        "href": "/notifications",
+                        "source_node_id": str(node.id),
+                        "node_status": node.status,
+                        "occurred_at": node.payload.get("requested_at"),
+                    }
+                )
+            continue
         if node.type != "scheduled_action":
             continue
         if node.status == "pending_review":
@@ -111,21 +157,22 @@ def build_notifications(graph: GraphSubset, logs: list[ReasoningLog] | None = No
         if not target_id:
             continue
         target = nodes_by_id.get(UUID(target_id))
-        if not target or target.type != "scheduled_action":
+        if not target or target.type not in {"scheduled_action", "daily_task"}:
             continue
         status = feedback.payload.get("status", "edited")
         status_label = {"approved": "approved", "dismissed": "dismissed", "edited": "edited"}.get(status, status)
+        href = f"/event/{target.id}" if target.type == "scheduled_action" else "/tasks/daily"
         items.append(
             {
                 "id": f"feedback:{feedback.id}",
                 "kind": status_label,
-                "title": f"Care action {status_label}",
+                "title": f"{'Care action' if target.type == 'scheduled_action' else 'Daily task'} {status_label}",
                 "body": target.payload.get("title") or "Care action",
                 "created_at": feedback.created_at.isoformat(),
-                "href": f"/event/{target.id}",
+                "href": href,
                 "source_node_id": str(target.id),
                 "node_status": target.status,
-                "occurred_at": target.payload.get("start_at"),
+                "occurred_at": target.payload.get("start_at") or target.payload.get("scheduled_time") or target.payload.get("timing_relation"),
             }
         )
 

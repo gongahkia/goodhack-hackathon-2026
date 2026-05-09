@@ -80,6 +80,22 @@ async def test_transcript_can_create_daily_research_and_appointment_buckets_with
 
 
 @pytest.mark.asyncio
+async def test_month_day_year_appointment_requires_calendar_write():
+    store = MemoryGraphStore()
+    transcript = await _transcript(store, "John has a doctor appointment on June 1, 2026 at 10am.")
+    redaction = await redact_stored_transcript(store, transcript)
+
+    result = await process_redacted_transcript(store, redaction, reference_date=date(2026, 5, 9))
+
+    appointment = result["appointment_candidates"][0]["payload"]
+    assert appointment["kind"] == "doctor"
+    assert appointment["date"] == "2026-06-01"
+    assert appointment["time"] == "10:00"
+    assert appointment["requires_calendar_write"] is True
+    assert appointment["calendar_write_status"] == "pending_user_approval"
+
+
+@pytest.mark.asyncio
 async def test_extraction_payload_conforms_to_strict_schema():
     store = MemoryGraphStore()
     transcript = await _transcript(store, "John needs Panadol before lunch daily.")

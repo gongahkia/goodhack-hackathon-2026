@@ -178,6 +178,10 @@ async def process_redacted_transcript(
     redaction: Node,
     reference_date: date | None = None,
 ) -> dict[str, Any]:
+    existing = await _existing_processed_result(store, redaction)
+    if existing:
+        return existing
+
     entities = extract_entities_from_redaction(redaction, reference_date)
     triage = triage_extracted_entities(entities)
     patient_id = str(redaction.payload.get("patient_id") or "")
@@ -238,6 +242,55 @@ async def process_redacted_transcript(
         "daily_tasks": [node.model_dump(mode="json") for node in daily_tasks],
         "ad_hoc_research_tasks": [node.model_dump(mode="json") for node in research_tasks],
         "appointment_candidates": [node.model_dump(mode="json") for node in appointments],
+    }
+
+
+async def _existing_processed_result(store: GraphStore, redaction: Node) -> dict[str, Any] | None:
+    edges = await store.list_edges()
+    entity_nodes = []
+    for edge in edges:
+        if edge.to_node == redaction.id and edge.type == "extracted_from":
+            node = await store.get_node(edge.from_node)
+            if node and node.type == "extracted_entities":
+                entity_nodes.append(node)
+    if not entity_nodes:
+        return None
+
+    entities_node = sorted(entity_nodes, key=lambda item: item.created_at, reverse=True)[0]
+    triage_nodes = []
+    for edge in edges:
+        if edge.to_node == entities_node.id and edge.type == "triaged_from":
+            node = await store.get_node(edge.from_node)
+            if node and node.type == "triage_decision":
+                triage_nodes.append(node)
+    if not triage_nodes:
+        return None
+
+    triage_node = sorted(triage_nodes, key=lambda item: item.created_at, reverse=True)[0]
+    artifacts: dict[str, list[Node]] = {
+        "daily_tasks": [],
+        "ad_hoc_research_tasks": [],
+        "appointment_candidates": [],
+    }
+    for edge in edges:
+        if edge.to_node != triage_node.id or edge.type != "classified_as":
+            continue
+        node = await store.get_node(edge.from_node)
+        if not node:
+            continue
+        if node.type == "daily_task":
+            artifacts["daily_tasks"].append(node)
+        elif node.type == "ad_hoc_research_task":
+            artifacts["ad_hoc_research_tasks"].append(node)
+        elif node.type == "appointment_candidate":
+            artifacts["appointment_candidates"].append(node)
+
+    return {
+        "extracted_entities": entities_node.model_dump(mode="json"),
+        "triage_decision": triage_node.model_dump(mode="json"),
+        "daily_tasks": [node.model_dump(mode="json") for node in sorted(artifacts["daily_tasks"], key=lambda item: item.created_at)],
+        "ad_hoc_research_tasks": [node.model_dump(mode="json") for node in sorted(artifacts["ad_hoc_research_tasks"], key=lambda item: item.created_at)],
+        "appointment_candidates": [node.model_dump(mode="json") for node in sorted(artifacts["appointment_candidates"], key=lambda item: item.created_at)],
     }
 
 
