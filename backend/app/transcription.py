@@ -47,6 +47,8 @@ CONTENT_TYPE_SUFFIXES = {
     "audio/mpeg": ".mp3",
     "audio/wav": ".wav",
     "audio/x-wav": ".wav",
+    "audio/aiff": ".aiff",
+    "audio/x-aiff": ".aiff",
 }
 
 
@@ -145,8 +147,10 @@ async def _transcribe_with_faster_whisper(audio: bytes, content_type: str | None
 def _run_faster_whisper(audio: bytes, content_type: str | None, settings: Settings) -> TranscriptionResult:
     try:
         model = _faster_whisper_model(settings.faster_whisper_model, settings.faster_whisper_compute_type)
-    except Exception as exc:
+    except ImportError as exc:
         raise TranscriptionUnavailable("CPU local transcription requires faster-whisper. Run: cd backend && uv pip install faster-whisper") from exc
+    except Exception as exc:
+        raise TranscriptionUnavailable(f"faster-whisper model load failed: {exc}") from exc
 
     suffix = _suffix_for_content_type(content_type)
     temp_path: Path | None = None

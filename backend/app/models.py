@@ -19,9 +19,21 @@ NodeType = Literal[
     "research_note",
     "decision_forecast",
     "memory_profile",
+    "human_evaluation",
 ]
 
-EdgeType = Literal["derived_from", "triggers", "recommends", "applies_to", "feedback_on", "extracted_from", "clarifies", "researches", "scheduled_from"]
+EdgeType = Literal[
+    "derived_from",
+    "triggers",
+    "recommends",
+    "applies_to",
+    "feedback_on",
+    "extracted_from",
+    "clarifies",
+    "researches",
+    "scheduled_from",
+    "evaluates",
+]
 CreatedBy = Literal["agent", "system", "user"]
 NodeStatus = Literal["pending_review", "approved", "dismissed", "edited", "clarification_required"]
 
@@ -91,3 +103,18 @@ class NodeEdit(BaseModel):
 class CaregiverNoteCreate(BaseModel):
     text: str
     recorded_at: datetime | None = None
+
+
+class ClarificationUpdate(BaseModel):
+    answer: str
+    payload_patch: dict[str, Any] = Field(default_factory=dict)
+
+
+class HumanEvaluationCreate(BaseModel):
+    action_id: UUID
+    reviewer_role: str = "clinician"
+    provenance_score: int = Field(ge=1, le=5)
+    reasoning_score: int = Field(ge=1, le=5)
+    appropriateness_score: int = Field(ge=1, le=5)
+    burden_score: int = Field(ge=1, le=5)
+    notes: str | None = None

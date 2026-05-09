@@ -35,6 +35,7 @@ export function CalendarView({ events }: { events: KgNode[] }) {
   const [rangeDays, setRangeDays] = useState(3);
   const [bufferMinutes, setBufferMinutes] = useState(10);
   const [restWindows, setRestWindows] = useState<RestWindow[]>(defaultRestWindows);
+  const [scheduleMessage, setScheduleMessage] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(() => localDayKey(new Date()));
   const [visibleRange, setVisibleRange] = useState<{ start: Date; end: Date } | null>(null);
   const currentView = mode === "agenda" ? "timeGridDay" : viewByMode[mode];
@@ -130,6 +131,25 @@ export function CalendarView({ events }: { events: KgNode[] }) {
     }
     const endAt = arg.event.end?.toISOString();
     const eventId = arg.event.id;
+    const original = localEvents.find((event) => event.id === eventId) || events.find((event) => event.id === eventId);
+    if (!original) {
+      arg.revert();
+      return;
+    }
+    const candidate: KgNode = {
+      ...original,
+      payload: {
+        ...original.payload,
+        start_at: startAt,
+        ...(endAt ? { end_at: endAt } : {})
+      }
+    };
+    if (overlapsProtectedRest(candidate, restWindows) && !candidate.payload.rest_interrupt_allowed) {
+      arg.revert();
+      setScheduleMessage(t("calendar.restMoveBlocked"));
+      window.setTimeout(() => setScheduleMessage(null), 4500);
+      return;
+    }
     setLocalEvents((current) =>
       current.map((event) =>
         event.id === eventId
@@ -145,7 +165,17 @@ export function CalendarView({ events }: { events: KgNode[] }) {
       )
     );
     try {
-      await api.editNode(eventId, { start_at: startAt, ...(endAt ? { end_at: endAt } : {}) });
+      await api.editNode(eventId, {
+        start_at: startAt,
+        ...(endAt ? { end_at: endAt } : {}),
+        caregiver_order_signal: {
+          moved_at: new Date().toISOString(),
+          previous_start_at: original.payload.start_at,
+          preferred_block: preferredBlockForDate(new Date(startAt), restWindows)
+        }
+      });
+      setScheduleMessage(t("calendar.scheduleUpdated"));
+      window.setTimeout(() => setScheduleMessage(null), 3500);
     } catch {
       arg.revert();
       setLocalEvents(events);
@@ -160,6 +190,7 @@ export function CalendarView({ events }: { events: KgNode[] }) {
 
   return (
     <div className="space-y-3">
+      {scheduleMessage ? <p className="rounded-lg border border-[#dfe8e2] bg-[#f5f8f6] px-3 py-2 text-sm font-semibold text-moss">{scheduleMessage}</p> : null}
       <div className="no-print space-y-2">
         <div className="grid grid-cols-5 gap-1 rounded-lg bg-[#eef3ef] p-1">
           {(["month", "week", "day", "range", "agenda"] as CalendarMode[]).map((item) => (
@@ -471,7 +502,7 @@ function buildAgendaBlocks(events: KgNode[], mode: CalendarMode, bufferMinutes: 
 }
 
 function buildDailyAgendaBlocks(events: KgNode[], bufferMinutes: number, locale: string, restWindows: RestWindow[], selectedDate: string): AgendaBlock[] {
-  const sorted = [...events].sort((a, b) => new Date(a.payload.start_at).getTime() - new Date(b.payload.start_at).getTime());
+  const sorted = [...events].sort(agendaEventSort);
   const blocks: AgendaBlock[] = [];
   for (const rest of restWindows.filter((window) => window.enabled)) {
     const start = dateForTime(selectedDate, rest.start);
@@ -561,6 +592,35 @@ function buildCalendarBreakEvents(events: KgNode[], bufferMinutes: number) {
     }
   }
   return breaks;
+}
+
+function agendaEventSort(a: KgNode, b: KgNode) {
+  const aStart = new Date(a.payload.start_at).getTime();
+  const bStart = new Date(b.payload.start_at).getTime();
+  if (aStart !== bStart) {
+    return aStart - bStart;
+  }
+  const aFixed = isFixedTiming(a) ? 0 : 1;
+  const bFixed = isFixedTiming(b) ? 0 : 1;
+  if (aFixed !== bFixed) {
+    return aFixed - bFixed;
+  }
+  return Number(b.payload.estimated_effort_minutes || 0) - Number(a.payload.estimated_effort_minutes || 0);
+}
+
+function preferredBlockForDate(date: Date, restWindows: RestWindow[]) {
+  const rest = restWindows.find((window) => window.enabled && pointInWindow(date, `${window.start}-${window.end}`));
+  if (rest) {
+    return `rest:${rest.id}`;
+  }
+  const hour = date.getHours();
+  if (hour >= 6 && hour < 12) {
+    return "morning";
+  }
+  if (hour >= 18 && hour < 22) {
+    return "evening";
+  }
+  return "daytime";
 }
 
 function formatEventWindow(event: KgNode, locale: string) {

@@ -228,14 +228,35 @@ function CaptureResult({ result }: { result: CaregiverNoteResult }) {
 
 function ResultNode({ node }: { node: KgNode }) {
   const editable = node.type === "care_intent" || node.type === "decision_forecast";
+  const [currentNode, setCurrentNode] = useState(node);
   const [correction, setCorrection] = useState(correctionDefaults(node));
+  const [clarificationAnswer, setClarificationAnswer] = useState("");
   const [saved, setSaved] = useState(false);
-  const title = node.payload.title || node.payload.question || node.payload.topic || node.type.replace("_", " ");
-  const needsClarification = node.status === "clarification_required" || node.payload.requires_clarification;
+  const [busy, setBusy] = useState<string | null>(null);
+  const title = currentNode.payload.title || currentNode.payload.question || currentNode.payload.topic || currentNode.type.replace("_", " ");
+  const needsClarification = currentNode.status === "clarification_required" || currentNode.payload.requires_clarification;
 
   async function saveCorrection() {
-    await api.editNode(node.id, cleanCorrection(correction));
+    setBusy("save");
+    const updated = await api.editNode(currentNode.id, cleanCorrection(correction));
+    setCurrentNode(updated);
     setSaved(true);
+    setBusy(null);
+  }
+
+  async function resolveClarification() {
+    setBusy("clarify");
+    const result = await api.clarifyIntent(currentNode.id, clarificationAnswer, cleanCorrection(correction));
+    setCurrentNode(result.node);
+    setSaved(true);
+    setBusy(null);
+  }
+
+  async function approveInterpretation() {
+    setBusy("approve");
+    const updated = await api.status(currentNode.id, "approved");
+    setCurrentNode(updated);
+    setBusy(null);
   }
 
   return (
@@ -244,16 +265,23 @@ function ResultNode({ node }: { node: KgNode }) {
         <div>
           <p className="inline-flex items-center gap-2 text-xs font-bold uppercase text-moss">
             {needsClarification ? <AlertCircle className="h-4 w-4 text-[#8d3d29]" /> : <ClipboardList className="h-4 w-4" />}
-            {node.type.replace("_", " ")}
+            {currentNode.type.replace("_", " ")}
           </p>
           <h2 className="mt-1 font-bold text-ink">{title}</h2>
-          {node.payload.clarification_reason ? <p className="mt-2 text-sm text-[#8d3d29]">{node.payload.clarification_reason}</p> : null}
-          {node.payload.summary ? <p className="mt-2 text-sm text-[#536159]">{node.payload.summary}</p> : null}
+          {currentNode.payload.clarification_reason ? <p className="mt-2 text-sm text-[#8d3d29]">{currentNode.payload.clarification_reason}</p> : null}
+          {currentNode.payload.summary ? <p className="mt-2 text-sm text-[#536159]">{currentNode.payload.summary}</p> : null}
         </div>
       </div>
       {editable ? (
         <div className="mt-4 grid gap-2 rounded-lg border border-[#dfe8e2] bg-[#fbfdfb] p-3">
           <p className="text-xs font-bold uppercase text-moss">Correct interpretation</p>
+          {needsClarification && Array.isArray(currentNode.payload.clarification_questions) ? (
+            <div className="space-y-1 rounded-lg bg-white p-3 text-sm text-[#34423a]">
+              {currentNode.payload.clarification_questions.map((question: string) => (
+                <p key={question}>{question}</p>
+              ))}
+            </div>
+          ) : null}
           <input
             className="min-h-10 rounded-lg border border-[#cbd8cf] bg-white px-3 text-sm outline-none focus:border-moss"
             onChange={(event) => {
@@ -272,17 +300,36 @@ function ResultNode({ node }: { node: KgNode }) {
             placeholder="Date or deadline"
             value={correction.date}
           />
+          {needsClarification ? (
+            <textarea
+              className="min-h-20 resize-none rounded-lg border border-[#cbd8cf] bg-white px-3 py-2 text-sm outline-none focus:border-moss"
+              onChange={(event) => setClarificationAnswer(event.target.value)}
+              placeholder="Answer the clarification question..."
+              value={clarificationAnswer}
+            />
+          ) : null}
           <button
             className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-[#cbd8cf] bg-white px-3 py-2 text-sm font-semibold text-moss"
-            onClick={saveCorrection}
+            onClick={needsClarification ? resolveClarification : saveCorrection}
+            disabled={Boolean(busy)}
             type="button"
           >
-            <Save className="h-4 w-4" /> {saved ? "Saved" : "Save correction"}
+            <Save className="h-4 w-4" /> {saved ? "Saved" : needsClarification ? "Resolve clarification" : "Save correction"}
           </button>
+          {currentNode.status === "pending_review" ? (
+            <button
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-moss px-3 py-2 text-sm font-semibold text-white"
+              onClick={approveInterpretation}
+              disabled={Boolean(busy)}
+              type="button"
+            >
+              <CheckCircle2 className="h-4 w-4" /> Approve for care plan
+            </button>
+          ) : null}
         </div>
       ) : null}
-      {node.type === "scheduled_action" ? (
-        <Link className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-moss" href={`/event/${node.id}`}>
+      {currentNode.type === "scheduled_action" ? (
+        <Link className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-moss" href={`/event/${currentNode.id}`}>
           Open action <ArrowRight className="h-4 w-4" />
         </Link>
       ) : null}

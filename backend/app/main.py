@@ -12,7 +12,7 @@ from .config import get_settings
 from .demo import PATIENT, PATIENT_ID, ingest_trigger_records, seed_baseline
 from .eval import evaluate_care_plan
 from .graph_queries import backtrace_sources, forward_actions
-from .models import CaregiverNoteCreate, NodeEdit, StatusUpdate
+from .models import CaregiverNoteCreate, ClarificationUpdate, HumanEvaluationCreate, NodeEdit, StatusUpdate
 from .notifications import build_notifications
 from .privacy import PiiRedactor, sanitize_audit_payload
 from .store import GraphStore, MemoryGraphStore, PostgresGraphStore
@@ -24,10 +24,12 @@ from .v2 import (
     build_forecast,
     build_memory_profile,
     event_reasoning_narrative,
+    create_human_evaluation,
     load_memory_profile,
     normalize_scheduling_payload,
     process_caregiver_note,
     refresh_memory_profile,
+    resolve_caregiver_clarification,
     search_verified_grants,
     search_verified_resources,
     with_scheduling_metadata,
@@ -227,6 +229,16 @@ async def caregiver_notes(note: CaregiverNoteCreate) -> dict:
     return await process_caregiver_note(store, PATIENT_ID, note.text, note.recorded_at, settings)
 
 
+@app.patch("/care-intents/{node_id}/clarification")
+async def clarify_caregiver_intent(node_id: UUID, update: ClarificationUpdate) -> dict:
+    try:
+        result = await resolve_caregiver_clarification(store, PATIENT_ID, node_id, update.answer, update.payload_patch, settings)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    await refresh_memory_profile(store, PATIENT_ID)
+    return result
+
+
 @app.post("/transcribe")
 async def transcribe(request: Request) -> dict:
     try:
@@ -323,3 +335,30 @@ async def dev_redact(payload: dict) -> dict:
 @app.get("/eval/care-plan")
 async def care_plan_eval() -> dict:
     return evaluate_care_plan(await store.graph_subset(PATIENT_ID), await store.list_reasoning_logs())
+
+
+@app.get("/eval/human")
+async def human_eval_workflow() -> dict:
+    graph = await store.graph_subset(PATIENT_ID)
+    automated = evaluate_care_plan(graph, await store.list_reasoning_logs())
+    evaluations = [node.model_dump(mode="json") for node in graph.nodes if node.type == "human_evaluation"]
+    evaluated_ids = {item["payload"].get("action_id") for item in evaluations}
+    queue = [
+        node.model_dump(mode="json")
+        for node in graph.nodes
+        if node.type == "scheduled_action" and str(node.id) not in evaluated_ids and node.status != "dismissed"
+    ]
+    return {
+        "automated": automated,
+        "evaluations": evaluations,
+        "queue": sorted(queue, key=lambda item: item["payload"].get("start_at") or "")[:10],
+    }
+
+
+@app.post("/eval/human")
+async def submit_human_eval(evaluation: HumanEvaluationCreate) -> dict:
+    try:
+        node = await create_human_evaluation(store, PATIENT_ID, evaluation.model_dump(mode="json"))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return node.model_dump(mode="json")

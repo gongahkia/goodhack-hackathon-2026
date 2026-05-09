@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Activity, BellRing, CalendarPlus, Check, Copy, Database, Download, FileClock, MonitorSmartphone, Moon, RefreshCw, RotateCcw, ShieldCheck, Smartphone, Sun, UserRound, Wifi } from "lucide-react";
+import { Activity, BellRing, CalendarPlus, Check, ClipboardCheck, Copy, Database, Download, FileClock, MonitorSmartphone, Moon, RefreshCw, RotateCcw, ShieldCheck, Smartphone, Sun, UserRound, Wifi } from "lucide-react";
 import { clsx } from "clsx";
 import { AppHeader } from "@/components/app-header";
 import { BottomNav } from "@/components/bottom-nav";
@@ -414,6 +414,12 @@ export default function SettingsPage() {
             <Link href="/records" className="flex items-center justify-between rounded-lg border border-[#dfe8e2] px-3 py-3 text-sm font-semibold text-moss">
               <span className="inline-flex items-center gap-2">
                 <RefreshCw className="h-4 w-4" /> {t("settings.recordProvenance")}
+              </span>
+              <span aria-hidden="true">›</span>
+            </Link>
+            <Link href="/eval" className="flex items-center justify-between rounded-lg border border-[#dfe8e2] px-3 py-3 text-sm font-semibold text-moss">
+              <span className="inline-flex items-center gap-2">
+                <ClipboardCheck className="h-4 w-4" /> Human eval workflow
               </span>
               <span aria-hidden="true">›</span>
             </Link>

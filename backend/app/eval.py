@@ -12,6 +12,12 @@ FIXED_TIME_TYPES = {"medication", "appointment"}
 def evaluate_care_plan(graph: GraphSubset, logs: list[ReasoningLog]) -> dict[str, Any]:
     logs_by_id = {log.id: log for log in logs}
     actions = [node for node in graph.nodes if node.type == "scheduled_action"]
+    human_evaluations = [node for node in graph.nodes if node.type == "human_evaluation"]
+    human_by_action: dict[str, list[Any]] = {}
+    for evaluation in human_evaluations:
+        action_id = str(evaluation.payload.get("action_id") or "")
+        if action_id:
+            human_by_action.setdefault(action_id, []).append(evaluation)
     decisions = []
     ungrounded_actions = []
 
@@ -37,6 +43,7 @@ def evaluate_care_plan(graph: GraphSubset, logs: list[ReasoningLog]) -> dict[str
         caregiver_burden = _caregiver_burden(action)
         source_specificity = _source_specificity(sources)
         safe_to_show = bool(sources) and bool(log and log.conclusion) and caregiver_burden != "high"
+        human_reviews = human_by_action.get(str(action.id), [])
 
         decisions.append(
             {
@@ -50,6 +57,8 @@ def evaluate_care_plan(graph: GraphSubset, logs: list[ReasoningLog]) -> dict[str
                 "caregiver_burden": caregiver_burden,
                 "source_specificity": source_specificity,
                 "safe_to_show": safe_to_show,
+                "human_review_count": len(human_reviews),
+                "human_scores": [_human_score_summary(review) for review in human_reviews],
                 "source_record_ids": [str(source.id) for source in sources],
                 "failures": failures,
             }
@@ -62,6 +71,8 @@ def evaluate_care_plan(graph: GraphSubset, logs: list[ReasoningLog]) -> dict[str
         "action_count": len(actions),
         "ungrounded_action_count": len(ungrounded_actions),
         "ungrounded_actions": ungrounded_actions,
+        "human_evaluation_count": len(human_evaluations),
+        "human_reviewed_action_count": len(human_by_action),
         "coverage": {
             "medication": any(decision["action_type"] == "medication" for decision in decisions),
             "therapy": any(decision["action_type"] == "therapy" for decision in decisions),
@@ -89,3 +100,15 @@ def _source_specificity(sources: list[Any]) -> str:
     if any(source.type in {"grant_opportunity", "recommended_resource"} for source in sources):
         return "curated_support"
     return "generic"
+
+
+def _human_score_summary(review: Any) -> dict[str, Any]:
+    scores = review.payload.get("scores") or {}
+    numeric = [value for value in scores.values() if isinstance(value, (int, float))]
+    return {
+        "reviewer_role": review.payload.get("reviewer_role"),
+        "average_score": round(sum(numeric) / len(numeric), 2) if numeric else None,
+        "scores": scores,
+        "notes": review.payload.get("notes"),
+        "reviewed_at": review.payload.get("reviewed_at"),
+    }

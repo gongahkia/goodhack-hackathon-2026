@@ -10,10 +10,41 @@ def build_notifications(graph: GraphSubset, logs: list[ReasoningLog] | None = No
     items: list[dict] = []
 
     for node in graph.nodes:
-        if node.type != "scheduled_action":
-            continue
         title = node.payload.get("title") or "Care action"
         when = node.payload.get("start_at")
+        if node.type == "care_intent":
+            title = node.payload.get("question") or node.payload.get("topic") or node.payload.get("normalized", {}).get("topic") or "Captured note"
+            if node.status == "clarification_required":
+                items.append(
+                    {
+                        "id": f"node:{node.id}:clarification_required",
+                        "kind": "review",
+                        "title": "Captured note needs clarification",
+                        "body": title,
+                        "created_at": node.created_at.isoformat(),
+                        "href": "/capture",
+                        "source_node_id": str(node.id),
+                        "node_status": node.status,
+                        "occurred_at": node.payload.get("target_date"),
+                    }
+                )
+            elif node.status == "pending_review":
+                items.append(
+                    {
+                        "id": f"node:{node.id}:pending_review",
+                        "kind": "review",
+                        "title": "Captured note needs approval",
+                        "body": title,
+                        "created_at": node.created_at.isoformat(),
+                        "href": "/capture",
+                        "source_node_id": str(node.id),
+                        "node_status": node.status,
+                        "occurred_at": node.payload.get("target_date"),
+                    }
+                )
+            continue
+        if node.type != "scheduled_action":
+            continue
         if node.status == "pending_review":
             items.append(
                 {

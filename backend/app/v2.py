@@ -332,6 +332,7 @@ async def process_caregiver_note(store: GraphStore, patient_id: str, text: str, 
                 "normalized": extracted_intent,
                 "requires_clarification": bool(extracted_intent.get("requires_clarification")),
                 "clarification_reason": extracted_intent.get("clarification_reason"),
+                "clarification_questions": _clarification_questions(intent_type, extracted_intent.get("clarification_reason")),
             },
             "system",
             status="clarification_required" if extracted_intent.get("requires_clarification") else "pending_review",
@@ -361,12 +362,135 @@ async def process_caregiver_note(store: GraphStore, patient_id: str, text: str, 
             "raw_text_redacted": redacted_text,
             "requires_clarification": True,
             "clarification_reason": "The note does not contain enough date, appointment, or decision detail to create a safe care action.",
+            "clarification_questions": [
+                "What should this become: appointment question, symptom note, follow-up task, document reminder, grant research task, or forecast decision?",
+                "What date, appointment, or deadline should it link to?",
+            ],
         },
         "system",
         status="clarification_required",
     )
     await store.create_edge(intent.id, note.id, "extracted_from")
     return {"note": note.model_dump(mode="json"), "intents": [intent.model_dump(mode="json")], "created": ["caregiver_note", "care_intent"]}
+
+
+async def resolve_caregiver_clarification(
+    store: GraphStore,
+    patient_id: str,
+    node_id: UUID,
+    answer: str,
+    payload_patch: dict[str, Any],
+    settings: Settings | None = None,
+) -> dict[str, Any]:
+    node = await store.get_node(node_id)
+    if not node or node.payload.get("patient_id") != patient_id:
+        raise ValueError("Clarification target not found")
+
+    graph = await store.graph_subset(patient_id)
+    patch = {
+        **payload_patch,
+        "clarification_answer": answer,
+        "requires_clarification": False,
+        "clarification_reason": None,
+        "clarification_questions": [],
+    }
+    created: dict[str, list[Node]] = {"research_notes": [], "scheduled_actions": []}
+    next_status = "pending_review"
+
+    if node.type == "care_intent":
+        intent_type = str(patch.get("intent_type") or node.payload.get("intent_type") or "general_caregiver_note")
+        if intent_type == "appointment_question":
+            target_date = _parse_spoken_date(str(patch.get("target_date") or answer or ""))
+            if target_date:
+                patch["target_date"] = target_date.isoformat()
+            if not patch.get("question") and not node.payload.get("question"):
+                patch["question"] = _extract_question_prompt(answer)
+            appointment = _matching_appointment(graph, target_date)
+            if appointment and not any(edge.from_node == node.id and edge.to_node == appointment.id and edge.type == "clarifies" for edge in graph.edges):
+                await store.create_edge(node.id, appointment.id, "clarifies")
+            if not target_date and not appointment:
+                next_status = "clarification_required"
+                patch["requires_clarification"] = True
+                patch["clarification_reason"] = "Confirm which appointment this question belongs to."
+                patch["clarification_questions"] = _clarification_questions(intent_type, patch["clarification_reason"])
+        else:
+            normalized = dict(node.payload.get("normalized") or {})
+            if answer:
+                normalized["clarification_answer"] = answer
+            for key in ["intent_type", "topic", "target_date", "urgency", "appointment_hint", "confidence"]:
+                if key in patch:
+                    normalized[key] = patch[key]
+            patch["normalized"] = normalized
+
+    elif node.type == "decision_forecast":
+        due_date = _parse_spoken_date(str(patch.get("decision_due_at") or patch.get("target_date") or answer or ""))
+        if not due_date:
+            next_status = "clarification_required"
+            patch["requires_clarification"] = True
+            patch["clarification_reason"] = "Confirm the decision deadline before scheduling follow-up tasks."
+            patch["clarification_questions"] = _clarification_questions("decision_forecast", patch["clarification_reason"])
+        else:
+            topic = str(patch.get("topic") or node.payload.get("topic") or _decision_topic(answer))
+            research_sources = node.payload.get("research_sources") or await _decision_research_sources(topic, settings)
+            patch.update(
+                {
+                    "topic": topic,
+                    "decision_due_at": due_date.replace(hour=18, minute=0, second=0, microsecond=0).isoformat(),
+                    "research_sources": research_sources,
+                    "missing_decision_inputs": node.payload.get("missing_decision_inputs") or _decision_missing_inputs(topic),
+                }
+            )
+            existing_graph = await store.graph_subset(patient_id)
+            if not _research_notes_for_forecast(node, existing_graph):
+                research = await _create_decision_research_note(store, node, patient_id, topic, research_sources, settings)
+                created["research_notes"].append(research)
+            if not _scheduled_from_forecast(node, existing_graph):
+                created["scheduled_actions"].extend(await _create_decision_prep_actions(store, node, patient_id, topic, due_date))
+
+    updated = await store.update_node_payload(node.id, patch, next_status)
+    if not updated:
+        raise ValueError("Clarification target not found")
+    feedback = await store.create_node(
+        "caregiver_feedback",
+        {"patient_id": patient_id, "target_node_id": str(node.id), "status": "edited", "payload_patch": payload_patch, "clarification_answer": answer},
+        "user",
+        status="approved",
+    )
+    await store.create_edge(feedback.id, node.id, "feedback_on")
+    return {
+        "node": updated.model_dump(mode="json"),
+        "research_notes": [item.model_dump(mode="json") for item in created["research_notes"]],
+        "scheduled_actions": [item.model_dump(mode="json") for item in created["scheduled_actions"]],
+    }
+
+
+async def create_human_evaluation(store: GraphStore, patient_id: str, payload: dict[str, Any]) -> Node:
+    action_id = _uuid(payload.get("action_id"))
+    if not action_id:
+        raise ValueError("action_id is required")
+    action = await store.get_node(action_id)
+    if not action or action.payload.get("patient_id") != patient_id or action.type != "scheduled_action":
+        raise ValueError("Action not found")
+    evaluation = await store.create_node(
+        "human_evaluation",
+        {
+            "patient_id": patient_id,
+            "action_id": str(action_id),
+            "reviewer_role": payload.get("reviewer_role") or "clinician",
+            "scores": {
+                "provenance": payload.get("provenance_score"),
+                "reasoning": payload.get("reasoning_score"),
+                "appropriateness": payload.get("appropriateness_score"),
+                "caregiver_burden": payload.get("burden_score"),
+            },
+            "notes": payload.get("notes"),
+            "reviewed_at": datetime.now(UTC).isoformat(),
+        },
+        "user",
+        status="approved",
+    )
+    await store.create_edge(evaluation.id, action_id, "evaluates")
+    return evaluation
 
 
 async def search_verified_resources(query: str, settings: Settings, allowlist: list[str] | None = None) -> list[dict[str, Any]]:
@@ -439,6 +563,9 @@ def normalize_scheduling_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     if not next_payload.get("scheduling_reason"):
         next_payload["scheduling_reason"] = _scheduling_reason(next_payload["timing_type"], action_type)
+
+    if next_payload["timing_type"] == "deadline" and next_payload.get("start_at") and not next_payload.get("deadline_at"):
+        next_payload["deadline_at"] = next_payload["start_at"]
 
     return next_payload
 
@@ -566,6 +693,7 @@ async def _create_appointment_question_intent(store: GraphStore, graph: GraphSub
             "raw_text_redacted": redacted_text,
             "requires_clarification": requires_clarification,
             "clarification_reason": "Confirm which appointment this question belongs to." if requires_clarification else None,
+            "clarification_questions": _clarification_questions("appointment_question", "Confirm which appointment this question belongs to.") if requires_clarification else [],
         },
         "system",
         status="clarification_required" if requires_clarification else "pending_review",
@@ -595,6 +723,7 @@ async def _create_decision_forecast_flow(
                 "raw_text_redacted": redacted_text,
                 "requires_clarification": True,
                 "clarification_reason": "Confirm the decision deadline before scheduling follow-up tasks.",
+                "clarification_questions": _clarification_questions("decision_forecast", "Confirm the decision deadline before scheduling follow-up tasks."),
             },
             "system",
             status="clarification_required",
@@ -620,6 +749,46 @@ async def _create_decision_forecast_flow(
     )
     await store.create_edge(forecast.id, note.id, "extracted_from")
 
+    research = await _create_decision_research_note(store, forecast, patient_id, topic, research_sources, settings)
+    scheduled_actions = await _create_decision_prep_actions(store, forecast, patient_id, topic, due_date)
+
+    return {"forecast": forecast, "research_notes": [research], "scheduled_actions": scheduled_actions}
+
+
+def _clarification_questions(intent_type: str, reason: Any = None) -> list[str]:
+    if intent_type == "appointment_question":
+        return [
+            "Which appointment date should this question attach to?",
+            "What exact question should appear in the appointment brief?",
+        ]
+    if intent_type == "decision_forecast":
+        return [
+            "What is the decision deadline?",
+            "What decision topic should the forecast track?",
+        ]
+    if intent_type == "symptom_note":
+        return [
+            "When did this symptom happen?",
+            "Which body part, medication, or clinician instruction does it relate to?",
+        ]
+    if intent_type in {"follow_up_task", "document_reminder", "grant_research_task"}:
+        return [
+            "What date should this be reviewed by?",
+            "Should this become a reminder, appointment question, or forecast decision?",
+        ]
+    if reason:
+        return [str(reason)]
+    return ["What should this note become, and when should it matter?"]
+
+
+async def _create_decision_research_note(
+    store: GraphStore,
+    forecast: Node,
+    patient_id: str,
+    topic: str,
+    research_sources: list[dict[str, Any]],
+    settings: Settings | None = None,
+) -> Node:
     research = await store.create_node(
         "research_note",
         {
@@ -634,11 +803,20 @@ async def _create_decision_forecast_flow(
         status="pending_review",
     )
     await store.create_edge(research.id, forecast.id, "researches")
+    return research
 
+
+async def _create_decision_prep_actions(
+    store: GraphStore,
+    forecast: Node,
+    patient_id: str,
+    topic: str,
+    due_date: datetime,
+) -> list[Node]:
     scheduled_actions = []
     for title, offset_days, effort in [
-        (f"Research {topic} options", 21, 45),
         (f"Prepare documents for {topic} decision", 7, 40),
+        (f"Family discussion: {topic} decision", 3, 30),
         (f"Final decision reminder: {topic}", 0, 20),
     ]:
         start = due_date - timedelta(days=offset_days)
@@ -651,13 +829,13 @@ async def _create_decision_forecast_flow(
                 "start_at": start.replace(hour=9, minute=0, second=0, microsecond=0).isoformat(),
                 "end_at": start.replace(hour=9, minute=effort if effort < 60 else 50, second=0, microsecond=0).isoformat(),
                 "estimated_effort_minutes": effort,
+                "decision_deadline": due_date.replace(hour=18, minute=0, second=0, microsecond=0).isoformat(),
             }
         )
         action, _ = await store.create_node_with_edge("scheduled_action", action_payload, "system", None, "pending_review", uuid4(), forecast.id, "derived_from")
         await store.create_edge(action.id, forecast.id, "scheduled_from")
         scheduled_actions.append(action)
-
-    return {"forecast": forecast, "research_notes": [research], "scheduled_actions": scheduled_actions}
+    return scheduled_actions
 
 
 def _parse_spoken_date(text: str) -> datetime | None:
@@ -989,11 +1167,13 @@ def _appointment_caregiver_questions(graph: GraphSubset, event: Node) -> list[st
     for edge in graph.edges:
         if edge.type == "clarifies" and edge.to_node == event.id:
             intent = by_id.get(edge.from_node)
-            if intent and intent.type == "care_intent":
+            if intent and intent.type == "care_intent" and intent.status != "dismissed":
                 linked.append(intent)
     if not linked and (event_start := _parse_datetime(event.payload.get("start_at"))):
         for node in graph.nodes:
             if node.type != "care_intent" or node.payload.get("intent_type") != "appointment_question":
+                continue
+            if node.status == "dismissed":
                 continue
             target_date = _parse_datetime(node.payload.get("target_date"))
             if target_date and target_date.date() == event_start.date():

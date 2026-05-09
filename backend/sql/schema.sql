@@ -19,7 +19,8 @@ create table if not exists nodes (
     'care_intent',
     'research_note',
     'decision_forecast',
-    'memory_profile'
+    'memory_profile',
+    'human_evaluation'
   )),
   payload jsonb not null,
   created_by text not null check (created_by in ('agent', 'system', 'user')),
@@ -32,7 +33,7 @@ create table if not exists edges (
   id uuid primary key,
   from_node uuid references nodes(id) on delete cascade,
   to_node uuid references nodes(id) on delete cascade,
-  type text not null check (type in ('derived_from', 'triggers', 'recommends', 'applies_to', 'feedback_on', 'extracted_from', 'clarifies', 'researches', 'scheduled_from')),
+  type text not null check (type in ('derived_from', 'triggers', 'recommends', 'applies_to', 'feedback_on', 'extracted_from', 'clarifies', 'researches', 'scheduled_from', 'evaluates')),
   created_at timestamptz default now()
 );
 
@@ -48,7 +49,8 @@ alter table nodes add constraint nodes_type_check check (type in (
   'care_intent',
   'research_note',
   'decision_forecast',
-  'memory_profile'
+  'memory_profile',
+  'human_evaluation'
 ));
 
 alter table nodes drop constraint if exists nodes_status_check;
@@ -64,7 +66,8 @@ alter table edges add constraint edges_type_check check (type in (
   'extracted_from',
   'clarifies',
   'researches',
-  'scheduled_from'
+  'scheduled_from',
+  'evaluates'
 ));
 
 create table if not exists nehr_records_raw (

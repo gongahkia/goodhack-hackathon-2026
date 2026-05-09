@@ -1,4 +1,4 @@
-import type { AppNotification, CaregiverNoteResult, CarePlanReview, EventDetail, ForecastItem, KgNode, MemoryProfile, PatientSummary, ReasoningLog, TranscriptionResult, VerifiedContent } from "./types";
+import type { AppNotification, CaregiverNoteResult, CarePlanReview, EventDetail, ForecastItem, HumanEvalWorkflow, KgNode, MemoryProfile, PatientSummary, ReasoningLog, TranscriptionResult, VerifiedContent } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
@@ -54,6 +54,11 @@ export const api = {
     return response.json() as Promise<TranscriptionResult>;
   },
   caregiverNote: (text: string) => request<CaregiverNoteResult>("/caregiver-notes", { method: "POST", body: JSON.stringify({ text }) }),
+  clarifyIntent: (id: string, answer: string, payload_patch: Record<string, any>) =>
+    request<{ node: KgNode; research_notes: KgNode[]; scheduled_actions: KgNode[] }>(`/care-intents/${id}/clarification`, {
+      method: "PATCH",
+      body: JSON.stringify({ answer, payload_patch })
+    }),
   resourceSearch: (topic: string, condition?: string) =>
     request<VerifiedContent[]>(`/resources/search?topic=${encodeURIComponent(topic)}${condition ? `&condition=${encodeURIComponent(condition)}` : ""}`),
   grantSearch: (condition: string) => request<VerifiedContent[]>(`/grants/search?condition=${encodeURIComponent(condition)}`),
@@ -61,6 +66,16 @@ export const api = {
   records: () => request<Array<KgNode & { forward_actions: KgNode[] }>>("/records"),
   audit: () => request<ReasoningLog[]>("/audit"),
   auditLog: (id: string) => request<ReasoningLog>(`/audit/${id}`),
+  humanEval: () => request<HumanEvalWorkflow>("/eval/human"),
+  submitHumanEval: (payload: {
+    action_id: string;
+    reviewer_role: string;
+    provenance_score: number;
+    reasoning_score: number;
+    appropriateness_score: number;
+    burden_score: number;
+    notes?: string;
+  }) => request<KgNode>("/eval/human", { method: "POST", body: JSON.stringify(payload) }),
   status: (id: string, status: string, feedback?: { usefulness_score?: number; feedback_note?: string; steer?: string }) =>
     request<KgNode>(`/nodes/${id}/status`, { method: "PATCH", body: JSON.stringify({ status, ...(feedback || {}) }) }),
   editNode: (id: string, payload: Record<string, any>) =>

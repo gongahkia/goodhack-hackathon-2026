@@ -26,6 +26,7 @@ from app.v2 import (
     openalex_search_works,
     process_caregiver_note,
     refresh_memory_profile,
+    resolve_caregiver_clarification,
     search_verified_grants,
     search_verified_resources,
     sealion_guard_check,
@@ -34,6 +35,7 @@ from app.v2 import (
     tinyfish_fetch_urls,
     tinyfish_search_web,
     verify_live_result,
+    create_human_evaluation,
 )
 from app.v2 import _verify_live_results_with_openai
 
@@ -462,6 +464,10 @@ async def test_caregiver_note_appointment_question_intent():
     assert "new lump" in intent.payload["question"]
     assert any(edge.from_node == intent.id and edge.type == "extracted_from" for edge in graph.edges)
     assert any(edge.from_node == intent.id and edge.to_node == appointment.id and edge.type == "clarifies" for edge in graph.edges)
+    assert "Ask the doctor about the new lump" not in prep["caregiver_questions"]
+
+    await store.update_node_status(intent.id, "approved")
+    prep = build_appointment_prep(appointment, await store.graph_subset(PATIENT_ID))
     assert prep and "Ask the doctor about the new lump" in prep["caregiver_questions"]
 
 
@@ -481,9 +487,54 @@ async def test_caregiver_note_decision_forecast_flow():
     assert any(node.type == "research_note" and node.payload["source_links"] for node in graph.nodes)
     scheduled = [node for node in graph.nodes if node.type == "scheduled_action"]
     forecast = build_forecast(graph)
-    assert len(scheduled) == 3
+    assert len(scheduled) == 4
     assert all(any(edge.from_node == node.id and edge.type == "derived_from" for edge in graph.edges) for node in scheduled)
     assert any(item["id"] == str(forecast_node.id) and item["research_sources"] for item in forecast)
+
+
+@pytest.mark.asyncio
+async def test_caregiver_note_clarification_resolution_links_appointment_after_review():
+    store = MemoryGraphStore()
+    await store.init()
+    await seed_baseline(store)
+    source = (await store.list_nodes(PATIENT_ID, ["nehr_record"]))[0]
+    appointment, _ = await store.create_node_with_edge(
+        "scheduled_action",
+        {
+            "patient_id": PATIENT_ID,
+            "title": "January clinic appointment",
+            "action_type": "appointment",
+            "start_at": "2027-01-28T09:00:00+00:00",
+            "end_at": "2027-01-28T10:00:00+00:00",
+        },
+        "system",
+        None,
+        "pending_review",
+        UUID("00000000-0000-0000-0000-000000000129"),
+        source.id,
+        "derived_from",
+    )
+
+    result = await process_caregiver_note(store, PATIENT_ID, "ask doctor about new lump")
+    intent = result["intents"][0]
+    assert intent["status"] == "clarification_required"
+
+    resolved = await resolve_caregiver_clarification(
+        store,
+        PATIENT_ID,
+        UUID(intent["id"]),
+        "Attach to 28 Jan appointment",
+        {"question": "Ask doctor about new lump"},
+    )
+    updated = resolved["node"]
+    assert updated["status"] == "pending_review"
+    assert updated["payload"]["target_date"]
+
+    prep = build_appointment_prep(appointment, await store.graph_subset(PATIENT_ID))
+    assert "Ask doctor about new lump" not in prep["caregiver_questions"]
+    await store.update_node_status(UUID(intent["id"]), "approved")
+    prep = build_appointment_prep(appointment, await store.graph_subset(PATIENT_ID))
+    assert "Ask doctor about new lump" in prep["caregiver_questions"]
 
 
 @pytest.mark.asyncio
@@ -744,3 +795,34 @@ async def test_v2_eval_harness_checks_each_decision():
     assert result["ungrounded_action_count"] == 0
     assert all(decision["provenance_correct"] for decision in result["decision_evals"])
     assert all(decision["reasoning_present"] for decision in result["decision_evals"])
+
+
+@pytest.mark.asyncio
+async def test_v2_human_evaluation_is_linked_to_decision_eval():
+    store = MemoryGraphStore()
+    await store.init()
+    await seed_baseline(store)
+    trigger = await ingest_trigger_records(store)
+    await run_agent_for_trigger(store, Settings(demo_agent_mode="scripted"), PATIENT_ID, trigger["node_ids"][0])
+    action = (await store.list_nodes(PATIENT_ID, ["scheduled_action"]))[0]
+
+    review = await create_human_evaluation(
+        store,
+        PATIENT_ID,
+        {
+            "action_id": str(action.id),
+            "reviewer_role": "clinician",
+            "provenance_score": 5,
+            "reasoning_score": 4,
+            "appropriateness_score": 4,
+            "burden_score": 3,
+            "notes": "Reasonable for demo fixture.",
+        },
+    )
+    result = evaluate_care_plan(await store.graph_subset(PATIENT_ID), await store.list_reasoning_logs())
+    decision = next(item for item in result["decision_evals"] if item["action_id"] == str(action.id))
+
+    assert review.type == "human_evaluation"
+    assert result["human_evaluation_count"] == 1
+    assert decision["human_review_count"] == 1
+    assert decision["human_scores"][0]["average_score"] == 4

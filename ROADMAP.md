@@ -63,6 +63,9 @@ These requirements sharpen the product around a voice-first caregiver workflow: 
 - The scheduler should place research tasks, documentation tasks, family discussions, application windows, and decision check-ins into available caregiver time blocks.
 - Fixed commitments such as appointments and medication remain fixed; research and preparation tasks should be flexible and moved around protected rest, work hours, helper availability, and family constraints.
 - The planning algorithm should optimize for feasibility, urgency, caregiver burden, and deadline risk rather than simply adding more tasks to the calendar.
+- Google Calendar integration should support this planning flow after transcription: read the user's existing calendar events to understand daily availability, then organize voice-derived care tasks around those commitments.
+- Calendar read access is used only as a pull input for availability and conflict detection; the app should not require broad calendar management permissions for daily task organization.
+- When transcription or care planning produces actual appointments, the app may create or update those appointments in the user's existing Google Calendar after user confirmation, but it must not request or use permission to delete existing calendar events.
 
 ### FR8 — Human confirmation and correction
 
@@ -160,6 +163,7 @@ These requirements sharpen the product around a voice-first caregiver workflow: 
 - **Memory layer**: caregiver Approve/Dismiss/Edit signals now condition future reasoning. If a caregiver consistently dismisses dietary suggestions, the agent down-weights them. Stored as structured preferences + raw event log.
 - **Scheduled re-reasoning**: nightly job re-examines the full record set per patient and surfaces "what's changed, what should I anticipate?" updates, not just record-triggered updates.
 - **Calendar export and subscription integrations**: provide standards-based calendar export (`.ics`) and a stable subscription feed that external calendar apps can consume directly. Caregivers should be able to add the provisioned care schedule to Apple Calendar, Google Calendar, Outlook, and similar apps, with updates flowing from Caregiver Companion into their existing daily calendar workflow.
+- **Google Calendar scoped integration**: after voice transcription and intent extraction, pull the caregiver's Google Calendar events to detect fixed commitments and available task windows, then organize daily care tasks around those constraints. For write actions, only request the minimum permissions needed to create or update confirmed care appointments; do not request delete permissions or any broader calendar control than the flow requires.
 - **Voice-intake foundation**: add a quick-capture flow for spoken or pasted caregiver notes. v2 may begin with browser or mobile OS dictation plus text review, but the backend contract should already model transcript, normalized interpretation, confidence, extracted date, appointment link, task type, and provenance.
 - **Appointment question capture**: allow a caregiver note to become a linked appointment talking point, with review before it is promoted to the appointment brief.
 - **Decision forecast capture**: allow a caregiver note to become a long-term forecast item with target decision date, researched action plan, and scheduled prep checkpoints.

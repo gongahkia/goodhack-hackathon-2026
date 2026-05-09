@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     transcription_provider: str = "local"
     local_transcription_backend: str = "auto"
     mlx_whisper_model: str = "mlx-community/whisper-large-v3-turbo-q4"
-    faster_whisper_model: str = "small.en"
+    faster_whisper_model: str = "base.en"
     faster_whisper_compute_type: str = "int8"
     groq_api_key: str | None = None
     groq_transcription_model: str = "whisper-large-v3-turbo"
@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     transcription_timeout_seconds: int = 120
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     demo_agent_mode: str = "auto"
-    scheduled_review_enabled: bool = False
+    scheduled_review_enabled: bool = True
     scheduled_review_interval_seconds: int = 86400
     live_search_llm_verification: bool = True
 

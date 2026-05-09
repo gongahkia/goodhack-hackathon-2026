@@ -65,6 +65,8 @@ const dictionaries: Record<Language, Dictionary> = {
     "calendar.fixedTimingReason": "Medication and appointments keep their prescribed time unless manually rescheduled.",
     "calendar.flexibleTimingReason": "This can move inside the care window when the caregiver drags it.",
     "calendar.restConflict": "Overlaps protected rest",
+    "calendar.restMoveBlocked": "Flexible low-risk tasks cannot be moved into protected rest. Use a morning or evening care window.",
+    "calendar.scheduleUpdated": "Schedule updated and saved as a caregiver timing preference.",
     "calendar.bufferMinutes": "Break buffer",
     "calendar.careTask": "Care task",
     "calendar.breakBlock": "Break",

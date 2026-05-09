@@ -180,3 +180,9 @@ export type TranscriptionResult = {
   model: string;
   language?: string | null;
 };
+
+export type HumanEvalWorkflow = {
+  automated: Record<string, any>;
+  evaluations: KgNode[];
+  queue: KgNode[];
+};
