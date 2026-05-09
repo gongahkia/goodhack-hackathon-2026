@@ -19,6 +19,7 @@ const dictionaries: Record<Language, Dictionary> = {
   en: {
     "nav.calendar": "Calendar",
     "nav.review": "Review",
+    "nav.capture": "Capture",
     "nav.forecast": "Forecast",
     "nav.records": "Records",
     "nav.settings": "Settings",

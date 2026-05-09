@@ -1,4 +1,4 @@
-export type NodeStatus = "pending_review" | "approved" | "dismissed" | "edited";
+export type NodeStatus = "pending_review" | "approved" | "dismissed" | "edited" | "clarification_required";
 
 export type KgNode = {
   id: string;
@@ -65,7 +65,33 @@ export type MemoryProfile = {
   average_scores: Record<string, number>;
   steering: Record<string, Record<string, number>>;
   learned_preferences: Array<{ kind: string; action_type: string; reason: string }>;
+  action_type_memory?: Array<{
+    action_type: string;
+    feedback_count: number;
+    approval_count: number;
+    dismissal_count: number;
+    edit_count: number;
+    average_score?: number | null;
+    steering: Record<string, number>;
+    edited_fields: Record<string, number>;
+    confidence: "low" | "medium" | "high" | string;
+    policy_scope: "preference" | "protected" | string;
+    recommendation: string;
+    latest_feedback_at?: string | null;
+    recent_notes: string[];
+  }>;
+  recent_feedback?: Array<{
+    target_node_id?: string | null;
+    title?: string | null;
+    action_type: string;
+    status: string;
+    usefulness_score?: number | null;
+    steer?: string | null;
+    note?: string | null;
+    created_at: string;
+  }>;
   recent_edits: Array<{ target_node_id: string; title?: string | null; fields: string[]; created_at: string }>;
+  safety_policy?: { protected_action_types: string[]; low_risk_action_types: string[]; rule: string };
 };
 
 export type VerifiedContent = {
@@ -129,4 +155,12 @@ export type AppNotification = {
   source_node_id?: string | null;
   node_status?: NodeStatus | null;
   occurred_at?: string | null;
+};
+
+export type CaregiverNoteResult = {
+  note: KgNode;
+  intents: KgNode[];
+  research_notes?: KgNode[];
+  scheduled_actions?: KgNode[];
+  created: string[];
 };

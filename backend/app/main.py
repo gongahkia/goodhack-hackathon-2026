@@ -12,8 +12,9 @@ from .config import get_settings
 from .demo import PATIENT, PATIENT_ID, ingest_trigger_records, seed_baseline
 from .eval import evaluate_care_plan
 from .graph_queries import backtrace_sources, forward_actions
-from .models import NodeEdit, StatusUpdate
+from .models import CaregiverNoteCreate, NodeEdit, StatusUpdate
 from .notifications import build_notifications
+from .privacy import PiiRedactor, sanitize_audit_payload
 from .store import GraphStore, MemoryGraphStore, PostgresGraphStore
 from .v2 import (
     build_appointment_prep,
@@ -22,7 +23,10 @@ from .v2 import (
     build_forecast,
     build_memory_profile,
     event_reasoning_narrative,
+    load_memory_profile,
     normalize_scheduling_payload,
+    process_caregiver_note,
+    refresh_memory_profile,
     search_verified_grants,
     search_verified_resources,
     with_scheduling_metadata,
@@ -197,7 +201,7 @@ async def calendar_feed() -> Response:
 
 @app.get("/memory")
 async def memory_profile() -> dict:
-    return build_memory_profile(await store.graph_subset(PATIENT_ID))
+    return await load_memory_profile(store, PATIENT_ID)
 
 
 @app.get("/care-plan/review")
@@ -215,6 +219,11 @@ async def care_plan_rereason() -> dict:
 @app.get("/forecast")
 async def forecast() -> list[dict]:
     return build_forecast(await store.graph_subset(PATIENT_ID))
+
+
+@app.post("/caregiver-notes")
+async def caregiver_notes(note: CaregiverNoteCreate) -> dict:
+    return await process_caregiver_note(store, PATIENT_ID, note.text, note.recorded_at, settings)
 
 
 @app.get("/resources/search")
@@ -254,6 +263,7 @@ async def update_status(node_id: UUID, update: StatusUpdate) -> dict:
         status="approved",
     )
     await store.create_edge(feedback.id, node_id, "feedback_on")
+    await refresh_memory_profile(store, PATIENT_ID)
     return node.model_dump(mode="json")
 
 
@@ -274,12 +284,14 @@ async def edit_node(node_id: UUID, edit: NodeEdit) -> dict:
         status="approved",
     )
     await store.create_edge(feedback.id, node_id, "feedback_on")
+    await refresh_memory_profile(store, PATIENT_ID)
     return node.model_dump(mode="json")
 
 
 @app.get("/audit")
 async def audit_logs() -> list[dict]:
-    return [log.model_dump(mode="json") for log in await store.list_reasoning_logs()]
+    patient = PATIENT.model_dump(mode="json")
+    return [sanitize_audit_payload(log.model_dump(mode="json"), patient) for log in await store.list_reasoning_logs()]
 
 
 @app.get("/audit/{log_id}")
@@ -287,7 +299,15 @@ async def audit_detail(log_id: UUID) -> dict:
     log = await store.get_reasoning_log(log_id)
     if not log:
         raise HTTPException(404, "Reasoning log not found")
-    return log.model_dump(mode="json")
+    return sanitize_audit_payload(log.model_dump(mode="json"), PATIENT.model_dump(mode="json"))
+
+
+@app.post("/dev/redact")
+async def dev_redact(payload: dict) -> dict:
+    redactor = PiiRedactor()
+    redactor.seed_from_patient(PATIENT.model_dump(mode="json"))
+    redacted = redactor.redact(payload)
+    return {"redacted": redacted, "privacy": redactor.summary()}
 
 
 @app.get("/eval/care-plan")

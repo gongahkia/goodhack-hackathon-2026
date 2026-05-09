@@ -11,6 +11,13 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-5.5"
     exa_api_key: str | None = None
     tinyfish_api_key: str | None = None
+    jina_api_key: str | None = None
+    openalex_api_key: str | None = None
+    semantic_scholar_api_key: str | None = None
+    sealion_api_key: str | None = None
+    sealion_base_url: str = "https://api.sea-lion.ai/v1"
+    sealion_model: str = "aisingapore/Gemma-SEA-LION-v4-27B-IT"
+    sealion_guard_model: str = "aisingapore/SEA-Guard"
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     demo_agent_mode: str = "auto"
     scheduled_review_enabled: bool = False

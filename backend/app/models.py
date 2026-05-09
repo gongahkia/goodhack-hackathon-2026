@@ -14,11 +14,16 @@ NodeType = Literal[
     "recommended_resource",
     "grant_opportunity",
     "caregiver_feedback",
+    "caregiver_note",
+    "care_intent",
+    "research_note",
+    "decision_forecast",
+    "memory_profile",
 ]
 
-EdgeType = Literal["derived_from", "triggers", "recommends", "applies_to", "feedback_on"]
+EdgeType = Literal["derived_from", "triggers", "recommends", "applies_to", "feedback_on", "extracted_from", "clarifies", "researches", "scheduled_from"]
 CreatedBy = Literal["agent", "system", "user"]
-NodeStatus = Literal["pending_review", "approved", "dismissed", "edited"]
+NodeStatus = Literal["pending_review", "approved", "dismissed", "edited", "clarification_required"]
 
 
 class Node(BaseModel):
@@ -81,3 +86,8 @@ class StatusUpdate(BaseModel):
 class NodeEdit(BaseModel):
     payload: dict[str, Any]
     status: NodeStatus = "edited"
+
+
+class CaregiverNoteCreate(BaseModel):
+    text: str
+    recorded_at: datetime | None = None

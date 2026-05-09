@@ -1,4 +1,5 @@
 <p align="center">
+  <img src="./asset/logo/hug.png" width="25%">
 <br>
 <strong>Caregiver Companion</strong>
 <br>
@@ -13,10 +14,6 @@
 <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind-CSS-38BDF8?style=flat-square">
 <img alt="Python" src="https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square">
 <img alt="License" src="https://img.shields.io/badge/license-unset-lightgrey?style=flat-square">
-</p>
-
-<p align="center">
-<b>English</b>
 </p>
 
 ---
@@ -75,11 +72,12 @@ The current repository implements the v1 hackathon MVP described in [ROADMAP.md]
   * Approve, dismiss, and edit pending actions
   * Feedback stored as graph state and summarized into learned caregiver memory signals
 * v2 care intelligence foundations
-  * `/memory` summarizes approve/dismiss/edit patterns by action type
+  * `/memory` summarizes approve/dismiss/edit patterns by action type, recent feedback, edited fields, confidence, and safety policy
   * `/care-plan/review` provides a nightly-style care-plan review narrative
   * Event detail renders readable reasoning narratives, not only raw logs
   * `.ics` calendar export and subscription feed for external calendar apps
   * `/resources/search` and `/grants/search` return allowlisted, verified resources with curated fallback when live search is unavailable
+  * Exa search, TinyFish rendered search, TinyFish fetch, and SEA-LION regional review/safety checks are exposed as first-class model tools with allowlist and redaction checks
   * Caregiver memory signals are passed back into future reasoning so low-risk suggestions can be down-ranked without suppressing high-priority care actions
 * Language support
   * English, Bahasa Melayu, Chinese, and Tamil UI language packs
@@ -171,8 +169,12 @@ OPENAI_API_KEY=
 OPENAI_MODEL=gpt-5.5
 EXA_API_KEY=
 TINYFISH_API_KEY=
+SEALION_API_KEY=
+SEALION_MODEL=aisingapore/Gemma-SEA-LION-v4-27B-IT
+SEALION_GUARD_MODEL=aisingapore/SEA-Guard
 CORS_ORIGINS=http://localhost:3000
 DEMO_AGENT_MODE=auto
+LIVE_SEARCH_LLM_VERIFICATION=true
 ```
 
 Frontend variables live in [`frontend/.env.example`](frontend/.env.example):
@@ -197,6 +199,9 @@ Backend deployment needs:
 DATABASE_URL=...
 OPENAI_API_KEY=...
 OPENAI_MODEL=gpt-5.5
+EXA_API_KEY=...
+TINYFISH_API_KEY=...
+SEALION_API_KEY=...
 CORS_ORIGINS=https://your-frontend.example
 ```
 
@@ -221,7 +226,7 @@ Backend tests cover:
 * v1 care plan generation
 * scheduled-action provenance enforcement
 * bidirectional trace helpers
-* v2 memory summaries, memory-conditioned reasoning, care-plan review, verified search, and `.ics` export generation
+* v2 memory summaries, memory-conditioned reasoning, first-class Exa/TinyFish tooling, care-plan review, verified search, and `.ics` export generation
 
 Frontend build checks:
 

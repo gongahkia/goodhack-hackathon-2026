@@ -14,22 +14,58 @@ create table if not exists nodes (
     'scheduled_action',
     'recommended_resource',
     'grant_opportunity',
-    'caregiver_feedback'
+    'caregiver_feedback',
+    'caregiver_note',
+    'care_intent',
+    'research_note',
+    'decision_forecast',
+    'memory_profile'
   )),
   payload jsonb not null,
   created_by text not null check (created_by in ('agent', 'system', 'user')),
   created_at timestamptz default now(),
   reasoning_log_id uuid references reasoning_logs(id),
-  status text default 'pending_review' check (status in ('pending_review', 'approved', 'dismissed', 'edited'))
+  status text default 'pending_review' check (status in ('pending_review', 'approved', 'dismissed', 'edited', 'clarification_required'))
 );
 
 create table if not exists edges (
   id uuid primary key,
   from_node uuid references nodes(id) on delete cascade,
   to_node uuid references nodes(id) on delete cascade,
-  type text not null check (type in ('derived_from', 'triggers', 'recommends', 'applies_to', 'feedback_on')),
+  type text not null check (type in ('derived_from', 'triggers', 'recommends', 'applies_to', 'feedback_on', 'extracted_from', 'clarifies', 'researches', 'scheduled_from')),
   created_at timestamptz default now()
 );
+
+alter table nodes drop constraint if exists nodes_type_check;
+alter table nodes add constraint nodes_type_check check (type in (
+  'nehr_record',
+  'inferred_condition',
+  'scheduled_action',
+  'recommended_resource',
+  'grant_opportunity',
+  'caregiver_feedback',
+  'caregiver_note',
+  'care_intent',
+  'research_note',
+  'decision_forecast',
+  'memory_profile'
+));
+
+alter table nodes drop constraint if exists nodes_status_check;
+alter table nodes add constraint nodes_status_check check (status in ('pending_review', 'approved', 'dismissed', 'edited', 'clarification_required'));
+
+alter table edges drop constraint if exists edges_type_check;
+alter table edges add constraint edges_type_check check (type in (
+  'derived_from',
+  'triggers',
+  'recommends',
+  'applies_to',
+  'feedback_on',
+  'extracted_from',
+  'clarifies',
+  'researches',
+  'scheduled_from'
+));
 
 create table if not exists nehr_records_raw (
   id uuid primary key,
@@ -58,7 +94,7 @@ begin
     join nodes source on source.id = e.to_node
     where e.from_node = new.id
       and e.type = 'derived_from'
-      and source.type in ('nehr_record', 'inferred_condition')
+      and source.type in ('nehr_record', 'inferred_condition', 'caregiver_note', 'care_intent', 'decision_forecast')
   ) then
     raise exception 'scheduled_action % must have a derived_from edge to a nehr_record or inferred_condition', new.id;
   end if;

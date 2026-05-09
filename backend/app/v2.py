@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlparse
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 from openai import AsyncOpenAI
@@ -14,8 +15,13 @@ from .config import Settings
 from .data import educational_resources, grants_database
 from .graph_queries import backtrace_sources
 from .models import GraphSubset, Node, ReasoningLog
+from .privacy import PiiRedactor
+from .store import GraphStore
 
 DEFAULT_ALLOWED_DOMAINS = ["gov.sg", "healthhub.sg", "aic.sg", "sgenable.sg", "moh.gov.sg", "parkinson.org"]
+MEMORY_PROTECTED_ACTION_TYPES = {"medication", "appointment", "grant", "falls_risk", "clinical"}
+MEMORY_LOW_RISK_ACTION_TYPES = {"therapy", "task", "resource", "education", "reminder"}
+MEMORY_PROFILE_SCHEMA_VERSION = 1
 
 
 def build_memory_profile(graph: GraphSubset) -> dict[str, Any]:
@@ -25,7 +31,10 @@ def build_memory_profile(graph: GraphSubset) -> dict[str, Any]:
     by_action_type: dict[str, Counter[str]] = defaultdict(Counter)
     scores_by_action_type: dict[str, list[int]] = defaultdict(list)
     steer_by_action_type: dict[str, Counter[str]] = defaultdict(Counter)
+    feedback_by_action_type: dict[str, list[Node]] = defaultdict(list)
+    edit_fields_by_action_type: dict[str, Counter[str]] = defaultdict(Counter)
     edits: list[dict[str, Any]] = []
+    recent_feedback: list[dict[str, Any]] = []
 
     for feedback in feedback_nodes:
         status = str(feedback.payload.get("status") or "edited")
@@ -34,11 +43,14 @@ def build_memory_profile(graph: GraphSubset) -> dict[str, Any]:
         action_type = str(target.payload.get("action_type") or target.type if target else "unknown")
         by_status[status] += 1
         by_action_type[action_type][status] += 1
+        feedback_by_action_type[action_type].append(feedback)
         if isinstance(feedback.payload.get("usefulness_score"), int):
             scores_by_action_type[action_type].append(feedback.payload["usefulness_score"])
         if feedback.payload.get("steer"):
             steer_by_action_type[action_type][str(feedback.payload["steer"])] += 1
         if feedback.payload.get("payload_patch"):
+            for field in feedback.payload["payload_patch"]:
+                edit_fields_by_action_type[action_type][str(field)] += 1
             edits.append(
                 {
                     "target_node_id": str(target.id) if target else str(target_id),
@@ -47,14 +59,53 @@ def build_memory_profile(graph: GraphSubset) -> dict[str, Any]:
                     "created_at": feedback.created_at.isoformat(),
                 }
             )
+        recent_feedback.append(
+            {
+                "target_node_id": str(target.id) if target else str(target_id) if target_id else None,
+                "title": target.payload.get("title") if target else None,
+                "action_type": action_type,
+                "status": status,
+                "usefulness_score": feedback.payload.get("usefulness_score"),
+                "steer": feedback.payload.get("steer"),
+                "note": feedback.payload.get("feedback_note"),
+                "created_at": feedback.created_at.isoformat(),
+            }
+        )
 
     learned_preferences = []
+    action_type_memory = []
     for action_type, counts in sorted(by_action_type.items()):
         approvals = counts.get("approved", 0)
         dismissals = counts.get("dismissed", 0)
         edits_count = counts.get("edited", 0)
         scores = scores_by_action_type.get(action_type, [])
         average_score = sum(scores) / len(scores) if scores else None
+        total = sum(counts.values())
+        confidence = _memory_confidence(total, average_score, counts)
+        policy_scope = "protected" if action_type in MEMORY_PROTECTED_ACTION_TYPES else "preference"
+        recent_for_type = sorted(feedback_by_action_type[action_type], key=lambda item: item.created_at, reverse=True)
+        recommendation = _memory_recommendation(action_type, counts, average_score)
+        action_type_memory.append(
+            {
+                "action_type": action_type,
+                "feedback_count": total,
+                "approval_count": approvals,
+                "dismissal_count": dismissals,
+                "edit_count": edits_count,
+                "average_score": round(average_score, 2) if average_score is not None else None,
+                "steering": dict(steer_by_action_type.get(action_type, {})),
+                "edited_fields": dict(edit_fields_by_action_type.get(action_type, {})),
+                "confidence": confidence,
+                "policy_scope": policy_scope,
+                "recommendation": recommendation,
+                "latest_feedback_at": recent_for_type[0].created_at.isoformat() if recent_for_type else None,
+                "recent_notes": [
+                    str(node.payload.get("feedback_note"))
+                    for node in recent_for_type
+                    if node.payload.get("feedback_note")
+                ][:3],
+            }
+        )
         if dismissals > approvals:
             learned_preferences.append(
                 {
@@ -111,12 +162,33 @@ def build_memory_profile(graph: GraphSubset) -> dict[str, Any]:
         "average_scores": {key: round(sum(value) / len(value), 2) for key, value in scores_by_action_type.items() if value},
         "steering": {key: dict(value) for key, value in steer_by_action_type.items()},
         "learned_preferences": learned_preferences,
+        "action_type_memory": sorted(action_type_memory, key=lambda item: (-item["feedback_count"], item["action_type"])),
+        "structured_preferences": _structured_preferences_from_action_memory(action_type_memory),
+        "recent_feedback": sorted(recent_feedback, key=lambda item: item["created_at"], reverse=True)[:8],
         "recent_edits": sorted(edits, key=lambda item: item["created_at"], reverse=True)[:5],
+        "safety_policy": {
+            "protected_action_types": sorted(MEMORY_PROTECTED_ACTION_TYPES),
+            "low_risk_action_types": sorted(MEMORY_LOW_RISK_ACTION_TYPES),
+            "rule": "Caregiver memory may shape phrasing, timing, and low-risk suggestion volume, but must not suppress clinical, falls-risk, appointment, medication, or grant-deadline actions.",
+        },
     }
 
 
 def memory_instructions(memory: dict[str, Any]) -> list[str]:
     instructions = []
+    safety_rule = memory.get("safety_policy", {}).get("rule")
+    if safety_rule and memory.get("feedback_count", 0):
+        instructions.append(str(safety_rule))
+    for item in memory.get("action_type_memory", []):
+        action_type = item.get("action_type", "care action")
+        confidence = item.get("confidence", "low")
+        recommendation = item.get("recommendation")
+        if recommendation:
+            instructions.append(f"Memory signal for {action_type}: {recommendation} Confidence: {confidence}.")
+        edited_fields = item.get("edited_fields") or {}
+        if edited_fields:
+            fields = ", ".join(sorted(edited_fields)[:4])
+            instructions.append(f"Caregiver often edits {action_type} fields ({fields}); make those fields explicit and easy to review.")
     for preference in memory.get("learned_preferences", []):
         kind = preference.get("kind")
         action_type = preference.get("action_type", "care action")
@@ -139,7 +211,42 @@ def memory_instructions(memory: dict[str, Any]) -> list[str]:
             instructions.append(f"Caregiver asked for fewer {action_type} suggestions; reduce low-risk reminders unless they are clinically or financially important.")
         elif kind == "steer_simpler":
             instructions.append(f"Caregiver asked for simpler {action_type} suggestions; use shorter descriptions and clearer next steps.")
-    return instructions
+    return list(dict.fromkeys(instructions))
+
+
+async def refresh_memory_profile(store: GraphStore, patient_id: str) -> Node:
+    profile = build_memory_profile(await store.graph_subset(patient_id))
+    payload = _memory_profile_payload(patient_id, profile)
+    existing = await _latest_memory_profile_node(store, patient_id)
+    if existing:
+        updated = await store.update_node_payload(existing.id, payload, "approved")
+        if updated:
+            return updated
+    return await store.create_node("memory_profile", payload, "system", status="approved")
+
+
+async def load_memory_profile(store: GraphStore, patient_id: str) -> dict[str, Any]:
+    existing = await _latest_memory_profile_node(store, patient_id)
+    if existing and isinstance(existing.payload.get("profile"), dict):
+        return existing.payload["profile"]
+    return (await refresh_memory_profile(store, patient_id)).payload["profile"]
+
+
+async def _latest_memory_profile_node(store: GraphStore, patient_id: str) -> Node | None:
+    nodes = await store.list_nodes(patient_id, ["memory_profile"])
+    matching = [node for node in nodes if node.payload.get("schema_version") == MEMORY_PROFILE_SCHEMA_VERSION]
+    return matching[0] if matching else nodes[0] if nodes else None
+
+
+def _memory_profile_payload(patient_id: str, profile: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "patient_id": patient_id,
+        "schema_version": MEMORY_PROFILE_SCHEMA_VERSION,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "source": "caregiver_feedback",
+        "profile": profile,
+        "memory_instructions": memory_instructions(profile),
+    }
 
 
 def build_care_plan_review(graph: GraphSubset, logs: list[ReasoningLog]) -> dict[str, Any]:
@@ -182,6 +289,73 @@ def build_care_plan_review(graph: GraphSubset, logs: list[ReasoningLog]) -> dict
         "memory_instructions": memory_instructions(memory),
         "narrative": narrative,
     }
+
+
+async def process_caregiver_note(store: GraphStore, patient_id: str, text: str, recorded_at: datetime | None = None, settings: Settings | None = None) -> dict[str, Any]:
+    redactor = PiiRedactor()
+    redacted_text = redactor.redact(text)
+    note = await store.create_node(
+        "caregiver_note",
+        {
+            "patient_id": patient_id,
+            "text": text,
+            "recorded_at": (recorded_at or datetime.now(UTC)).isoformat(),
+            "privacy": redactor.summary(),
+        },
+        "user",
+        status="approved",
+    )
+    lowered = text.lower()
+    graph = await store.graph_subset(patient_id)
+    extracted_intent = await _extract_note_intent_with_openai(redacted_text, settings)
+    if extracted_intent:
+        await store.update_node_payload(note.id, {"llm_extraction_redacted": extracted_intent}, "approved")
+        intent_type = str(extracted_intent.get("intent_type") or "")
+        if intent_type not in {"appointment_question", "decision_forecast"}:
+            intent = await store.create_node(
+                "care_intent",
+                {
+                    "patient_id": patient_id,
+                    "intent_type": intent_type or "general_caregiver_note",
+                    "raw_text_redacted": redacted_text,
+                    "normalized": extracted_intent,
+                    "requires_clarification": bool(extracted_intent.get("requires_clarification")),
+                    "clarification_reason": extracted_intent.get("clarification_reason"),
+                },
+                "system",
+                status="clarification_required" if extracted_intent.get("requires_clarification") else "pending_review",
+            )
+            await store.create_edge(intent.id, note.id, "extracted_from")
+            return {"note": note.model_dump(mode="json"), "intents": [intent.model_dump(mode="json")], "created": ["caregiver_note", "care_intent"]}
+
+    if "appointment" in lowered or "ask doc" in lowered or "ask doctor" in lowered:
+        intent = await _create_appointment_question_intent(store, graph, note, patient_id, text, redacted_text)
+        return {"note": note.model_dump(mode="json"), "intents": [intent.model_dump(mode="json")], "created": ["caregiver_note", "care_intent"]}
+
+    if "decide" in lowered and ("wheelchair" in lowered or "mobility" in lowered or "equipment" in lowered):
+        created = await _create_decision_forecast_flow(store, note, patient_id, text, redacted_text)
+        return {
+            "note": note.model_dump(mode="json"),
+            "intents": [created["forecast"].model_dump(mode="json")],
+            "research_notes": [item.model_dump(mode="json") for item in created["research_notes"]],
+            "scheduled_actions": [item.model_dump(mode="json") for item in created["scheduled_actions"]],
+            "created": ["caregiver_note", "decision_forecast", "research_note", "scheduled_action"],
+        }
+
+    intent = await store.create_node(
+        "care_intent",
+        {
+            "patient_id": patient_id,
+            "intent_type": "clarification_needed",
+            "raw_text_redacted": redacted_text,
+            "requires_clarification": True,
+            "clarification_reason": "The note does not contain enough date, appointment, or decision detail to create a safe care action.",
+        },
+        "system",
+        status="clarification_required",
+    )
+    await store.create_edge(intent.id, note.id, "extracted_from")
+    return {"note": note.model_dump(mode="json"), "intents": [intent.model_dump(mode="json")], "created": ["caregiver_note", "care_intent"]}
 
 
 async def search_verified_resources(query: str, settings: Settings, allowlist: list[str] | None = None) -> list[dict[str, Any]]:
@@ -256,6 +430,286 @@ def normalize_scheduling_payload(payload: dict[str, Any]) -> dict[str, Any]:
         next_payload["scheduling_reason"] = _scheduling_reason(next_payload["timing_type"], action_type)
 
     return next_payload
+
+
+def _memory_confidence(total: int, average_score: float | None, counts: Counter[str]) -> str:
+    if total >= 4 and average_score is not None:
+        return "high"
+    if total >= 3 or counts.get("edited", 0) >= 2:
+        return "medium"
+    return "low"
+
+
+def _memory_recommendation(action_type: str, counts: Counter[str], average_score: float | None) -> str:
+    approvals = counts.get("approved", 0)
+    dismissals = counts.get("dismissed", 0)
+    edits = counts.get("edited", 0)
+    protected = action_type in MEMORY_PROTECTED_ACTION_TYPES
+    if dismissals > approvals and protected:
+        return "Keep surfacing safety-critical actions, but reduce repetition and explain the evidence more clearly."
+    if dismissals > approvals:
+        return "Down-rank similar low-risk suggestions unless new evidence makes them important."
+    if average_score is not None and average_score <= 2.5 and not protected:
+        return "Treat similar suggestions as low confidence and ask for confirmation before adding more."
+    if approvals > dismissals or (average_score is not None and average_score >= 4):
+        return "Continue surfacing similar grounded suggestions with concise next steps."
+    if edits:
+        return "Preserve the action, but improve wording, timing, and editable details."
+    return "Use as weak preference context only."
+
+
+def _structured_preferences_from_action_memory(action_type_memory: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    structured = []
+    for item in action_type_memory:
+        action_type = str(item.get("action_type") or "unknown")
+        protected = action_type in MEMORY_PROTECTED_ACTION_TYPES
+        preference_kind = "protected_review" if protected else "weak_context"
+        if item.get("dismissal_count", 0) > item.get("approval_count", 0) and not protected:
+            preference_kind = "downrank"
+        elif item.get("approval_count", 0) > item.get("dismissal_count", 0):
+            preference_kind = "reinforce"
+        elif item.get("edited_fields"):
+            preference_kind = "adapt_format"
+        if (item.get("steering") or {}).get("simpler"):
+            preference_kind = "simplify"
+        structured.append(
+            {
+                "action_type": action_type,
+                "preference_kind": preference_kind,
+                "confidence": item.get("confidence", "low"),
+                "evidence_count": item.get("feedback_count", 0),
+                "last_updated": item.get("latest_feedback_at"),
+                "safety_tier": "protected" if protected else "low_risk" if action_type in MEMORY_LOW_RISK_ACTION_TYPES else "routine",
+                "suppression_allowed": not protected,
+                "recommendation": item.get("recommendation"),
+            }
+        )
+    return sorted(structured, key=lambda item: (-int(item["evidence_count"]), item["action_type"]))
+
+
+async def _extract_note_intent_with_openai(redacted_text: str, settings: Settings | None) -> dict[str, Any] | None:
+    if not settings or settings.use_scripted_agent:
+        return None
+    try:
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
+        response = await client.responses.create(
+            model=settings.openai_model,
+            instructions=(
+                "Extract one caregiver note intent for a Singapore caregiver app. "
+                "Return compact JSON only with keys: intent_type, topic, target_date, urgency, appointment_hint, "
+                "requires_clarification, clarification_reason, confidence. "
+                "Allowed intent_type values: appointment_question, symptom_note, decision_forecast, follow_up_task, "
+                "document_reminder, grant_research_task, general_caregiver_note. "
+                "Do not add medical advice; mark vague clinical notes as requires_clarification."
+            ),
+            input=json.dumps({"transcript_redacted": redacted_text}),
+            max_output_tokens=500,
+        )
+        payload = json.loads(getattr(response, "output_text", "") or "{}")
+    except Exception:
+        return None
+    return _validated_note_intent(payload)
+
+
+def _validated_note_intent(payload: Any) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    allowed = {
+        "appointment_question",
+        "symptom_note",
+        "decision_forecast",
+        "follow_up_task",
+        "document_reminder",
+        "grant_research_task",
+        "general_caregiver_note",
+    }
+    intent_type = str(payload.get("intent_type") or "general_caregiver_note")
+    if intent_type not in allowed:
+        intent_type = "general_caregiver_note"
+    confidence = payload.get("confidence")
+    if not isinstance(confidence, (int, float)):
+        confidence = None
+    return {
+        "intent_type": intent_type,
+        "topic": str(payload.get("topic") or "")[:240],
+        "target_date": str(payload.get("target_date") or "")[:40] or None,
+        "urgency": str(payload.get("urgency") or "routine")[:40],
+        "appointment_hint": str(payload.get("appointment_hint") or "")[:160] or None,
+        "requires_clarification": bool(payload.get("requires_clarification")),
+        "clarification_reason": str(payload.get("clarification_reason") or "")[:240] or None,
+        "confidence": confidence,
+    }
+
+
+async def _create_appointment_question_intent(store: GraphStore, graph: GraphSubset, note: Node, patient_id: str, text: str, redacted_text: str) -> Node:
+    target_date = _parse_spoken_date(text)
+    question = _extract_question_prompt(text)
+    requires_clarification = target_date is None and "appointment" not in text.lower()
+    intent = await store.create_node(
+        "care_intent",
+        {
+            "patient_id": patient_id,
+            "intent_type": "appointment_question",
+            "question": question,
+            "target_date": target_date.isoformat() if target_date else None,
+            "raw_text_redacted": redacted_text,
+            "requires_clarification": requires_clarification,
+            "clarification_reason": "Confirm which appointment this question belongs to." if requires_clarification else None,
+        },
+        "system",
+        status="clarification_required" if requires_clarification else "pending_review",
+    )
+    await store.create_edge(intent.id, note.id, "extracted_from")
+    appointment = _matching_appointment(graph, target_date)
+    if appointment:
+        await store.create_edge(intent.id, appointment.id, "clarifies")
+    return intent
+
+
+async def _create_decision_forecast_flow(store: GraphStore, note: Node, patient_id: str, text: str, redacted_text: str) -> dict[str, Any]:
+    due_date = _parse_spoken_date(text)
+    if not due_date:
+        forecast = await store.create_node(
+            "decision_forecast",
+            {
+                "patient_id": patient_id,
+                "topic": _decision_topic(text),
+                "raw_text_redacted": redacted_text,
+                "requires_clarification": True,
+                "clarification_reason": "Confirm the decision deadline before scheduling follow-up tasks.",
+            },
+            "system",
+            status="clarification_required",
+        )
+        await store.create_edge(forecast.id, note.id, "extracted_from")
+        return {"forecast": forecast, "research_notes": [], "scheduled_actions": []}
+
+    topic = _decision_topic(text)
+    forecast = await store.create_node(
+        "decision_forecast",
+        {
+            "patient_id": patient_id,
+            "topic": topic,
+            "decision_due_at": due_date.replace(hour=18, minute=0, second=0, microsecond=0).isoformat(),
+            "raw_text_redacted": redacted_text,
+            "safety_tier": "planning",
+        },
+        "system",
+        status="pending_review",
+    )
+    await store.create_edge(forecast.id, note.id, "extracted_from")
+
+    research = await store.create_node(
+        "research_note",
+        {
+            "patient_id": patient_id,
+            "topic": topic,
+            "summary": f"Research options, costs, funding, and clinician criteria before deciding whether to proceed with {topic}.",
+            "source": "caregiver_note",
+        },
+        "system",
+        status="pending_review",
+    )
+    await store.create_edge(research.id, forecast.id, "researches")
+
+    scheduled_actions = []
+    for title, offset_days, effort in [
+        (f"Research {topic} options", 21, 45),
+        (f"Prepare documents for {topic} decision", 7, 40),
+        (f"Final decision reminder: {topic}", 0, 20),
+    ]:
+        start = due_date - timedelta(days=offset_days)
+        action_payload = normalize_scheduling_payload(
+            {
+                "patient_id": patient_id,
+                "title": title,
+                "description": "Follow up on the caregiver-dictated long-term planning decision and keep the final choice reviewable.",
+                "action_type": "task",
+                "start_at": start.replace(hour=9, minute=0, second=0, microsecond=0).isoformat(),
+                "end_at": start.replace(hour=9, minute=effort if effort < 60 else 50, second=0, microsecond=0).isoformat(),
+                "estimated_effort_minutes": effort,
+            }
+        )
+        action, _ = await store.create_node_with_edge("scheduled_action", action_payload, "system", None, "pending_review", uuid4(), forecast.id, "derived_from")
+        await store.create_edge(action.id, forecast.id, "scheduled_from")
+        scheduled_actions.append(action)
+
+    return {"forecast": forecast, "research_notes": [research], "scheduled_actions": scheduled_actions}
+
+
+def _parse_spoken_date(text: str) -> datetime | None:
+    months = {
+        "jan": 1,
+        "january": 1,
+        "feb": 2,
+        "february": 2,
+        "mar": 3,
+        "march": 3,
+        "apr": 4,
+        "april": 4,
+        "may": 5,
+        "jun": 6,
+        "june": 6,
+        "jul": 7,
+        "july": 7,
+        "aug": 8,
+        "august": 8,
+        "sep": 9,
+        "sept": 9,
+        "september": 9,
+        "oct": 10,
+        "october": 10,
+        "nov": 11,
+        "november": 11,
+        "dec": 12,
+        "december": 12,
+    }
+    match = re.search(r"\b(?:by|on|for)?\s*(\d{1,2})\s+([A-Za-z]{3,9})(?:\s+(\d{4}))?\b", text, re.IGNORECASE)
+    if not match:
+        return None
+    day = int(match.group(1))
+    month = months.get(match.group(2).lower())
+    if not month:
+        return None
+    now = datetime.now(UTC)
+    year = int(match.group(3)) if match.group(3) else now.year
+    try:
+        parsed = datetime(year, month, day, tzinfo=UTC)
+    except ValueError:
+        return None
+    if not match.group(3) and parsed.date() < now.date():
+        parsed = parsed.replace(year=year + 1)
+    return parsed
+
+
+def _extract_question_prompt(text: str) -> str:
+    match = re.search(r"\bask\s+(?:doc|doctor|clinician)\s+(?:about|whether|if)?\s*(.+)$", text, re.IGNORECASE)
+    if match:
+        topic = match.group(1).strip(" .")
+        if topic:
+            return f"Ask the doctor about {topic}"
+    return text.strip()
+
+
+def _decision_topic(text: str) -> str:
+    match = re.search(r"\bconsider\s+(.+?)(?:,\s*|\s+and\s+|\s+decide\b|\s+by\b|$)", text, re.IGNORECASE)
+    if match:
+        return match.group(1).strip(" .")
+    if "wheelchair" in text.lower():
+        return "wheelchair"
+    return "care decision"
+
+
+def _matching_appointment(graph: GraphSubset, target_date: datetime | None) -> Node | None:
+    if not target_date:
+        return None
+    for node in graph.nodes:
+        if node.type != "scheduled_action" or node.payload.get("action_type") != "appointment":
+            continue
+        appointment_at = _parse_datetime(node.payload.get("start_at"))
+        if appointment_at and appointment_at.date() == target_date.date():
+            return node
+    return None
 
 
 def with_scheduling_metadata(node: Node) -> Node:
@@ -592,6 +1046,8 @@ async def _verify_live_results_with_openai(results: list[dict[str, Any]], settin
     if not results or not settings.live_search_llm_verification or settings.use_scripted_agent:
         return results
     try:
+        redactor = PiiRedactor()
+        sanitized_input = redactor.redact({"query": query, "results": results})
         client = AsyncOpenAI(api_key=settings.openai_api_key)
         response = await client.responses.create(
             model=settings.openai_model,
@@ -600,7 +1056,7 @@ async def _verify_live_results_with_openai(results: list[dict[str, Any]], settin
                 "Return compact JSON only: {\"decisions\":[{\"url\":\"...\",\"status\":\"safe_to_show|needs_review|reject\",\"reason\":\"...\"}]}. "
                 "Prefer official, relevant, current sources. Reject unrelated or unsafe medical claims."
             ),
-            input=json.dumps({"query": query, "results": results}, default=str),
+            input=json.dumps(sanitized_input, default=str),
             max_output_tokens=500,
         )
         payload = json.loads(getattr(response, "output_text", "") or "{}")
@@ -628,23 +1084,182 @@ async def _verify_live_results_with_openai(results: list[dict[str, Any]], settin
     return verified
 
 
-async def _exa_search(query: str, api_key: str, allowlist: list[str]) -> list[dict[str, Any]]:
+async def exa_search_web(
+    query: str,
+    settings: Settings,
+    allowlist: list[str] | None = None,
+    num_results: int = 5,
+    search_type: str = "auto",
+) -> dict[str, Any]:
+    domains = allowlist or DEFAULT_ALLOWED_DOMAINS
+    if not settings.exa_api_key:
+        return {"provider": "exa", "configured": False, "results": [], "error": "EXA_API_KEY is not configured."}
+    try:
+        results = await _exa_search(query, settings.exa_api_key, domains, num_results, search_type)
+        verified = await _verify_live_results_with_openai(results, settings, query)
+        return {"provider": "exa", "configured": True, "allowlist": domains, "results": verified}
+    except httpx.HTTPError as exc:
+        return {"provider": "exa", "configured": True, "allowlist": domains, "results": [], "error": str(exc)}
+
+
+async def tinyfish_search_web(
+    query: str,
+    settings: Settings,
+    allowlist: list[str] | None = None,
+    location: str = "SG",
+    language: str = "en",
+) -> dict[str, Any]:
+    domains = allowlist or DEFAULT_ALLOWED_DOMAINS
+    if not settings.tinyfish_api_key:
+        return {"provider": "tinyfish_search", "configured": False, "results": [], "error": "TINYFISH_API_KEY is not configured."}
+    try:
+        results = await _tinyfish_search(query, settings.tinyfish_api_key, domains, location, language)
+        verified = await _verify_live_results_with_openai(results, settings, query)
+        return {"provider": "tinyfish_search", "configured": True, "allowlist": domains, "results": verified}
+    except httpx.HTTPError as exc:
+        return {"provider": "tinyfish_search", "configured": True, "allowlist": domains, "results": [], "error": str(exc)}
+
+
+async def tinyfish_fetch_urls(
+    urls: list[str],
+    settings: Settings,
+    allowlist: list[str] | None = None,
+    format: str = "markdown",
+) -> dict[str, Any]:
+    domains = allowlist or DEFAULT_ALLOWED_DOMAINS
+    allowed_urls = [url for url in urls[:10] if _url_allowed(url, domains)]
+    rejected_urls = [url for url in urls[:10] if url not in allowed_urls]
+    if not settings.tinyfish_api_key:
+        return {
+            "provider": "tinyfish_fetch",
+            "configured": False,
+            "allowlist": domains,
+            "results": [],
+            "rejected_urls": rejected_urls,
+            "error": "TINYFISH_API_KEY is not configured.",
+        }
+    if not allowed_urls:
+        return {
+            "provider": "tinyfish_fetch",
+            "configured": True,
+            "allowlist": domains,
+            "results": [],
+            "rejected_urls": rejected_urls,
+            "error": "No URLs passed the allowlist.",
+        }
+    try:
+        fetched = await _tinyfish_fetch(allowed_urls, settings.tinyfish_api_key, format)
+        return {
+            "provider": "tinyfish_fetch",
+            "configured": True,
+            "allowlist": domains,
+            "results": fetched["results"],
+            "errors": fetched["errors"],
+            "rejected_urls": rejected_urls,
+        }
+    except httpx.HTTPError as exc:
+        return {
+            "provider": "tinyfish_fetch",
+            "configured": True,
+            "allowlist": domains,
+            "results": [],
+            "errors": [],
+            "rejected_urls": rejected_urls,
+            "error": str(exc),
+        }
+
+
+async def sealion_regional_review(
+    text: str,
+    settings: Settings,
+    task: str = "caregiver_language_review",
+    target_language: str = "English",
+    max_tokens: int = 500,
+) -> dict[str, Any]:
+    if not settings.sealion_api_key:
+        return {"provider": "sealion", "configured": False, "result": None, "error": "SEALION_API_KEY is not configured."}
+    prompt = (
+        "You are reviewing caregiver-app text for Singapore and Southeast Asian family caregivers. "
+        "Keep medical claims conservative, preserve meaning, flag confusing phrasing, and adapt tone for the target language or locale. "
+        "Return compact JSON with keys: revised_text, issues, locale_notes, confidence.\n\n"
+        f"Task: {task}\nTarget language: {target_language}\nText:\n{text}"
+    )
+    try:
+        client = AsyncOpenAI(api_key=settings.sealion_api_key, base_url=settings.sealion_base_url)
+        completion = await client.chat.completions.create(
+            model=settings.sealion_model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max(100, min(max_tokens, 1000)),
+            temperature=0.2,
+        )
+        content = completion.choices[0].message.content if completion.choices else ""
+        return {
+            "provider": "sealion",
+            "configured": True,
+            "model": settings.sealion_model,
+            "task": task,
+            "target_language": target_language,
+            "result": content,
+        }
+    except Exception as exc:
+        return {"provider": "sealion", "configured": True, "model": settings.sealion_model, "result": None, "error": str(exc)}
+
+
+async def sealion_guard_check(
+    prompt: str,
+    settings: Settings,
+    response: str | None = None,
+) -> dict[str, Any]:
+    if not settings.sealion_api_key:
+        return {"provider": "sealion_guard", "configured": False, "result": None, "error": "SEALION_API_KEY is not configured."}
+    if response is not None:
+        content = f"Human user:{prompt}\nAI assistant:{response}."
+    else:
+        content = prompt
+    try:
+        client = AsyncOpenAI(api_key=settings.sealion_api_key, base_url=settings.sealion_base_url)
+        completion = await client.chat.completions.create(
+            model=settings.sealion_guard_model,
+            messages=[{"role": "user", "content": content}],
+            max_tokens=50,
+            temperature=0,
+        )
+        result = completion.choices[0].message.content if completion.choices else ""
+        return {
+            "provider": "sealion_guard",
+            "configured": True,
+            "model": settings.sealion_guard_model,
+            "result": result,
+        }
+    except Exception as exc:
+        return {"provider": "sealion_guard", "configured": True, "model": settings.sealion_guard_model, "result": None, "error": str(exc)}
+
+
+async def _exa_search(query: str, api_key: str, allowlist: list[str], num_results: int = 5, search_type: str = "auto") -> list[dict[str, Any]]:
     async with httpx.AsyncClient(timeout=8) as client:
         response = await client.post(
             "https://api.exa.ai/search",
             headers={"x-api-key": api_key},
-            json={"query": query, "includeDomains": allowlist, "numResults": 5},
+            json={
+                "query": query,
+                "type": search_type,
+                "includeDomains": allowlist,
+                "numResults": max(1, min(num_results, 10)),
+                "contents": {"highlights": True},
+            },
         )
         response.raise_for_status()
         data = response.json()
     results = []
     for item in data.get("results", []):
+        highlights = item.get("highlights") or []
+        snippet = " ".join(str(highlight) for highlight in highlights[:3]) or str(item.get("text") or item.get("snippet") or "")
         result = verify_live_result(
             {
                 "title": item.get("title") or "Untitled source",
                 "source": _source_from_url(item.get("url")),
                 "url": item.get("url"),
-                "snippet": str(item.get("text") or item.get("snippet") or "")[:400],
+                "snippet": snippet[:700],
                 "published_at": item.get("publishedDate") or item.get("published_at"),
             },
             allowlist,
@@ -657,28 +1272,23 @@ async def _exa_search(query: str, api_key: str, allowlist: list[str]) -> list[di
 async def _live_search(query: str, settings: Settings, allowlist: list[str]) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     if settings.exa_api_key:
-        try:
-            results = await _exa_search(query, settings.exa_api_key, allowlist)
-            if results:
-                return await _verify_live_results_with_openai(results, settings, query)
-        except httpx.HTTPError:
-            pass
+        exa = await exa_search_web(query, settings, allowlist)
+        results = exa.get("results", [])
+        if results:
+            return results
     if settings.tinyfish_api_key:
-        try:
-            results = await _tinyfish_search(query, settings.tinyfish_api_key, allowlist)
-            return await _verify_live_results_with_openai(results, settings, query)
-        except httpx.HTTPError:
-            return []
+        tinyfish = await tinyfish_search_web(query, settings, allowlist)
+        return tinyfish.get("results", [])
     return []
 
 
-async def _tinyfish_search(query: str, api_key: str, allowlist: list[str]) -> list[dict[str, Any]]:
+async def _tinyfish_search(query: str, api_key: str, allowlist: list[str], location: str = "SG", language: str = "en") -> list[dict[str, Any]]:
     scoped_query = f"{query} " + " OR ".join(f"site:{domain}" for domain in allowlist)
     async with httpx.AsyncClient(timeout=8) as client:
         response = await client.get(
             "https://api.search.tinyfish.ai",
             headers={"X-API-Key": api_key},
-            params={"query": scoped_query, "location": "SG", "language": "en"},
+            params={"query": scoped_query, "location": location, "language": language},
         )
         response.raise_for_status()
         data = response.json()
@@ -697,6 +1307,37 @@ async def _tinyfish_search(query: str, api_key: str, allowlist: list[str]) -> li
         if result["verification_status"] != "reject":
             results.append(result)
     return results
+
+
+async def _tinyfish_fetch(urls: list[str], api_key: str, format: str = "markdown") -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=150) as client:
+        response = await client.post(
+            "https://api.fetch.tinyfish.ai",
+            headers={"X-API-Key": api_key},
+            json={"urls": urls[:10], "format": format, "links": False, "image_links": False},
+        )
+        response.raise_for_status()
+        data = response.json()
+    results = []
+    for item in data.get("results", []):
+        text = item.get("text")
+        if not isinstance(text, str):
+            text = json.dumps(text, default=str)
+        results.append(
+            {
+                "url": item.get("url"),
+                "final_url": item.get("final_url"),
+                "title": item.get("title"),
+                "description": item.get("description"),
+                "language": item.get("language"),
+                "author": item.get("author"),
+                "published_at": item.get("published_date"),
+                "format": item.get("format") or format,
+                "latency_ms": item.get("latency_ms"),
+                "text": str(text or "")[:5000],
+            }
+        )
+    return {"results": results, "errors": data.get("errors", [])}
 
 
 def verify_live_result(result: dict[str, Any], allowlist: list[str] | None = None) -> dict[str, Any]:
@@ -897,6 +1538,11 @@ def _human_datetime(value: Any) -> str:
 
 def _domain(url: str) -> str:
     return urlparse(url).netloc.lower().removeprefix("www.")
+
+
+def _url_allowed(url: str, allowlist: list[str]) -> bool:
+    domain = _domain(url)
+    return bool(domain) and any(domain == allowed or domain.endswith(f".{allowed}") for allowed in allowlist)
 
 
 def _source_from_url(url: Any) -> str:

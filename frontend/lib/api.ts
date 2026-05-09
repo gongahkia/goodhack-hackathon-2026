@@ -1,4 +1,4 @@
-import type { AppNotification, CarePlanReview, EventDetail, ForecastItem, KgNode, MemoryProfile, PatientSummary, ReasoningLog, VerifiedContent } from "./types";
+import type { AppNotification, CaregiverNoteResult, CarePlanReview, EventDetail, ForecastItem, KgNode, MemoryProfile, PatientSummary, ReasoningLog, VerifiedContent } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
@@ -29,6 +29,7 @@ export const api = {
   carePlanReview: () => request<CarePlanReview>("/care-plan/review"),
   carePlanRereason: () => request<{ reasoning_log_id: string; conclusion: string; review: CarePlanReview }>("/care-plan/rereason", { method: "POST" }),
   forecast: () => request<ForecastItem[]>("/forecast"),
+  caregiverNote: (text: string) => request<CaregiverNoteResult>("/caregiver-notes", { method: "POST", body: JSON.stringify({ text }) }),
   resourceSearch: (topic: string, condition?: string) =>
     request<VerifiedContent[]>(`/resources/search?topic=${encodeURIComponent(topic)}${condition ? `&condition=${encodeURIComponent(condition)}` : ""}`),
   grantSearch: (condition: string) => request<VerifiedContent[]>(`/grants/search?condition=${encodeURIComponent(condition)}`),

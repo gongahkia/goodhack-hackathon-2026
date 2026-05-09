@@ -11,8 +11,9 @@ from openai import AsyncOpenAI
 from ..config import Settings
 from ..data import educational_resources, grants_database
 from ..demo import PATIENT
+from ..privacy import PiiRedactor
 from ..store import GraphStore
-from ..v2 import build_memory_profile, memory_instructions
+from ..v2 import load_memory_profile, memory_instructions
 from .tools import AgentToolbox
 
 
@@ -30,13 +31,17 @@ Your operating principles:
 
 5. Match grants from the curated catalog. Use search_grants_database with condition keywords and patient demographics to find applicable grants.
 
-6. Web search is a last resort. Use web_search only when no curated data answers the question, and only with the default allowlist of Singapore government domains.
+6. Web research is allowlisted and provider-aware. Curated data is still preferred. When curated data is insufficient, use exa_search for semantic source discovery, tinyfish_search for fresh or dynamically rendered pages, and tinyfish_fetch to read an allowlisted source returned by search. The legacy web_search tool is available as a unified fallback. Never use external search to bypass the allowlist or invent unsupported medical guidance.
 
-7. Status conventions: every node you create defaults to status='pending_review'. The caregiver will approve, dismiss, or edit each one. Do not create nodes with any other status.
+7. Use SEA-LION as a regional helper, not the primary clinical reasoner. Call sealion_regional_review when caregiver-facing wording needs Southeast Asia language or cultural review, and sealion_guard_check when you need a secondary safety classification. These external calls should receive redacted text.
 
-8. Show your reasoning. Your thinking between tool calls is logged and shown to the caregiver. Be clear and clinically literate but not jargon-heavy. Write as if explaining to an intelligent family member, not a doctor.
+8. Status conventions: every node you create defaults to status='pending_review'. The caregiver will approve, dismiss, or edit each one. Do not create nodes with any other status.
 
-9. When you are done reasoning over this trigger, output a final summary message that explains in 2-3 sentences what you did and why. This becomes the reasoning_log conclusion.
+9. Show your reasoning. Your thinking between tool calls is logged and shown to the caregiver. Be clear and clinically literate but not jargon-heavy. Write as if explaining to an intelligent family member, not a doctor.
+
+10. Treat caregiver memory as preference evidence, not clinical evidence. It can change wording, scheduling details, and low-risk suggestion volume. It must not suppress medication, falls-risk, appointment, or grant-deadline actions when source records justify them.
+
+11. When you are done reasoning over this trigger, output a final summary message that explains in 2-3 sentences what you did and why. This becomes the reasoning_log conclusion.
 
 You are operating in Singapore. Use Singapore healthcare context (polyclinics, NEHR, AIC, MOH, CHAS, etc.) when relevant.
 """
@@ -44,21 +49,29 @@ You are operating in Singapore. Use Singapore healthcare context (polyclinics, N
 
 async def run_agent_for_trigger(store: GraphStore, settings: Settings, patient_id: str, trigger_node_id: str) -> dict[str, Any]:
     log = await store.create_reasoning_log(f"new_nehr_record:{trigger_node_id}")
-    toolbox = AgentToolbox(store, settings, patient_id, log.id)
-    memory = build_memory_profile(await store.graph_subset(patient_id))
+    memory = await load_memory_profile(store, patient_id)
     memory_notes = memory_instructions(memory)
     if memory_notes:
         await store.append_reasoning_step(log.id, {"kind": "memory", "text": " ".join(memory_notes)})
     if settings.use_scripted_agent:
+        toolbox = AgentToolbox(store, settings, patient_id, log.id)
         conclusion = await run_scripted_demo_reasoner(store, toolbox, patient_id, UUID(trigger_node_id), memory_notes)
         await store.finish_reasoning_log(log.id, conclusion)
         return {"reasoning_log_id": str(log.id), "conclusion": conclusion, "mode": "scripted"}
 
+    pii_redactor = PiiRedactor()
+    patient_context = PATIENT.model_dump(mode="json")
+    pii_redactor.seed_from_patient(patient_context)
+    sanitized_patient_context = pii_redactor.redact(patient_context)
+    sanitized_memory_notes = pii_redactor.redact(memory_notes or ["No learned caregiver preferences yet."])
+    await store.append_reasoning_step(log.id, {"kind": "privacy_redaction", **pii_redactor.summary()})
+
+    toolbox = AgentToolbox(store, settings, patient_id, log.id, pii_redactor)
     client = AsyncOpenAI(api_key=settings.openai_api_key)
     next_input: str | list[dict[str, Any]] = (
-        f"Patient context: {PATIENT.model_dump(mode='json')}\n"
+        f"Patient context: {sanitized_patient_context}\n"
         f"Trigger node id: {trigger_node_id}\n"
-        f"Caregiver memory instructions: {memory_notes or ['No learned caregiver preferences yet.']}\n"
+        f"Caregiver memory instructions: {sanitized_memory_notes}\n"
         "Reason over this new record and create the v1 caregiving graph updates."
     )
     previous_response_id: str | None = None
@@ -89,7 +102,7 @@ async def run_agent_for_trigger(store: GraphStore, settings: Settings, patient_i
             if item_type == "function_call":
                 tool_used = True
                 args = json.loads(item.arguments or "{}")
-                await store.append_reasoning_step(log.id, {"kind": "tool_call", "tool": item.name, "input": args})
+                await store.append_reasoning_step(log.id, {"kind": "tool_call", "tool": item.name, "input": pii_redactor.redact(args)})
                 result = await toolbox.call(item.name, args)
                 tool_results.append(
                     {
