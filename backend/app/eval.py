@@ -95,8 +95,6 @@ def _caregiver_burden(action: Any) -> str:
 def _source_specificity(sources: list[Any]) -> str:
     if not sources:
         return "none"
-    if any(source.type == "nehr_record" for source in sources):
-        return "clinical_record"
     if any(source.type in {"grant_opportunity", "recommended_resource"} for source in sources):
         return "curated_support"
     return "generic"

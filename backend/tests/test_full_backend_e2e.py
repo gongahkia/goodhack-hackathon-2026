@@ -82,8 +82,6 @@ def test_full_audio_upload_to_tasks_calendar_scheduler_research_and_notification
         main,
         "settings",
         Settings(
-            legacy_demo_enabled=False,
-            scheduled_review_enabled=False,
             api_write_key=API_KEY,
             openai_api_key="test-openai-key",
             tinyfish_api_key=None,

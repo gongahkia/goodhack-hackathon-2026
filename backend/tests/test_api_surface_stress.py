@@ -24,8 +24,6 @@ def _install_test_app(monkeypatch) -> MemoryGraphStore:
         main,
         "settings",
         Settings(
-            legacy_demo_enabled=False,
-            scheduled_review_enabled=False,
             api_write_key=API_KEY,
             clinician_review_key="clinician-test-key",
             openai_api_key=None,
@@ -48,11 +46,12 @@ async def _seed_surface_graph(store: MemoryGraphStore) -> dict[str, UUID]:
     await store.append_reasoning_step(log.id, {"kind": "seed", "patient_name": "John Tan"})
     await store.finish_reasoning_log(log.id, "Seeded surface graph for route coverage.")
     source = await store.create_node(
-        "nehr_record",
+        "caregiver_note",
         {
             "patient_id": "mdm-tan",
             "title": "Neurology review",
-            "content": {"title": "Neurology review", "summary": "Parkinson symptoms and mobility risk reviewed."},
+            "text": "Doctor reviewed mobility risk and asked caregiver to monitor falls.",
+            "summary": "Parkinson symptoms and mobility risk reviewed.",
         },
         "system",
         reasoning_log_id=log.id,
@@ -169,20 +168,15 @@ def test_openapi_route_surface_matches_expected_backend_contract(monkeypatch):
     _install_test_app(monkeypatch)
     expected = {
         ("GET", "/health"),
-        ("POST", "/demo/reset"),
-        ("POST", "/demo/ingest"),
         ("GET", "/patient/summary"),
         ("GET", "/patient/identity"),
         ("POST", "/patient/identity/aliases"),
-        ("GET", "/records"),
-        ("GET", "/records/{record_id}"),
         ("GET", "/events"),
         ("GET", "/events/{event_id}"),
         ("GET", "/calendar.ics"),
         ("GET", "/calendar/feed.ics"),
         ("GET", "/memory"),
         ("GET", "/care-plan/review"),
-        ("POST", "/care-plan/rereason"),
         ("GET", "/forecast"),
         ("POST", "/caregiver-notes"),
         ("PATCH", "/care-intents/{node_id}/clarification"),
@@ -235,9 +229,6 @@ def test_openapi_route_surface_matches_expected_backend_contract(monkeypatch):
 def test_write_and_clinician_routes_enforce_configured_auth(monkeypatch):
     ids = asyncio.run(_seed_surface_graph(_install_test_app(monkeypatch)))
     write_requests = [
-        ("post", "/demo/reset", {}),
-        ("post", "/demo/ingest", {}),
-        ("post", "/care-plan/rereason", {}),
         ("post", "/patient/identity/aliases", {"json": {"alias": "Ah Ma"}}),
         ("post", "/caregiver-notes", {"json": {"text": "Ask doctor about falls at the next appointment."}}),
         ("patch", f"/care-intents/{ids['intent']}/clarification", {"json": {"answer": "Use the June appointment."}}),
@@ -317,20 +308,15 @@ def test_every_api_surface_smoke_handles_representative_inputs_without_500(monke
 
     requests = [
         ("get", "/health", {}),
-        ("post", "/demo/reset", {"headers": _headers(), "expected": {410}}),
-        ("post", "/demo/ingest", {"headers": _headers(), "expected": {410}}),
         ("get", "/patient/summary", {}),
         ("get", "/patient/identity", {}),
         ("post", "/patient/identity/aliases", {"headers": _headers(), "json": {"alias": "Ah Ma", "source": "surface_smoke", "confidence": 0.9}}),
-        ("get", "/records", {"expected": {410}}),
-        ("get", f"/records/{ids['source']}", {"expected": {410}}),
         ("get", "/events", {}),
         ("get", f"/events/{ids['action']}", {}),
         ("get", "/calendar.ics", {}),
         ("get", "/calendar/feed.ics", {}),
         ("get", "/memory", {}),
         ("get", "/care-plan/review", {}),
-        ("post", "/care-plan/rereason", {"headers": _headers()}),
         ("get", "/forecast", {}),
         ("post", "/caregiver-notes", {"headers": _headers(), "json": {"text": "Ask doctor about falls at the June appointment."}}),
         ("patch", f"/care-intents/{ids['intent']}/clarification", {"headers": _headers(), "json": {"answer": "Use June 1 appointment.", "payload_patch": {"target_date": "2026-06-01"}}}),

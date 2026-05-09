@@ -82,7 +82,7 @@ Expected:
 {"ok": true, "service": "Caregiver Companion API"}
 ```
 
-Legacy NEHR/demo runtime paths should be disabled by default:
+Legacy NEHR/demo runtime paths should be physically absent:
 
 ```bash
 curl -i -X POST http://127.0.0.1:8000/demo/reset
@@ -91,7 +91,7 @@ curl -i -X POST http://127.0.0.1:8000/demo/reset
 Expected status:
 
 ```text
-410 Gone
+404 Not Found
 ```
 
 ## End-To-End Transcription Flow
@@ -242,10 +242,24 @@ curl -s -X POST http://127.0.0.1:8000/privacy/retention/purge \
 
 ## Automated Verification
 
+Run the deterministic full backend E2E for the demo flow:
+
+```bash
+backend/.venv/bin/python -m pytest backend/tests/test_full_backend_e2e.py -q
+```
+
+This covers first transcription through all three buckets (`daily_tasks`, `appointment_candidates`, `ad_hoc_research_tasks`), mocked Google Calendar write, mocked next-day conflict detection, guarded research, recommendations, and notifications.
+
 Run the complete backend suite:
 
 ```bash
 TINYFISH_API_KEY= SEALION_API_KEY= backend/.venv/bin/python -m pytest backend/tests
+```
+
+Live-token testing is intentionally manual. Once real `OPENAI_API_KEY` and `GOOGLE_CALENDAR_ACCESS_TOKEN` values are available, use the format in:
+
+```bash
+open docs/DEMO.md
 ```
 
 The API contract tests cover:

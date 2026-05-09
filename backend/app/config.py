@@ -38,10 +38,6 @@ class Settings(BaseSettings):
     transcription_timeout_seconds: int = 120
     transcription_rate_limit: int = 20
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
-    legacy_demo_enabled: bool = False
-    demo_agent_mode: str = "auto"
-    scheduled_review_enabled: bool = False
-    scheduled_review_interval_seconds: int = 86400
     live_search_llm_verification: bool = True
     api_read_key: str | None = Field(default=None, repr=False)
     api_write_key: str | None = Field(default=None, repr=False)
@@ -61,12 +57,11 @@ class Settings(BaseSettings):
     vendor_semantic_scholar_enabled: bool = True
     vendor_google_calendar_enabled: bool = True
     vendor_allowed_purposes: str = ""
-    scheduled_review_lock_ttl_seconds: int = 3600
     google_calendar_id: str = "primary"
     google_calendar_access_token: str | None = Field(default=None, repr=False)
     google_calendar_api_base_url: str = "https://www.googleapis.com/calendar/v3"
 
-    model_config = SettingsConfigDict(env_file=(REPO_ROOT / ".env", BACKEND_ROOT / ".env"), env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=(REPO_ROOT / ".env", BACKEND_ROOT / ".env"), env_file_encoding="utf-8", extra="ignore")
 
     @property
     def repo_root(self) -> Path:
@@ -78,7 +73,7 @@ class Settings(BaseSettings):
 
     @property
     def use_scripted_agent(self) -> bool:
-        return self.demo_agent_mode == "scripted" or not self.openai_api_key
+        return not self.openai_api_key
 
 
 @lru_cache

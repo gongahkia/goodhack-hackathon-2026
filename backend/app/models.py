@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 
 
 NodeType = Literal[
-    "nehr_record",
     "inferred_condition",
     "scheduled_action",
     "recommended_resource",
@@ -105,15 +104,6 @@ class ReasoningLog(BaseModel):
     steps: list[dict[str, Any]] = Field(default_factory=list)
     conclusion: str | None = None
     created_at: datetime
-
-
-class NehrRecordRaw(BaseModel):
-    id: UUID
-    patient_id: str
-    record_type: str
-    content: dict[str, Any]
-    recorded_at: datetime
-    ingested_at: datetime
 
 
 class GraphSubset(BaseModel):

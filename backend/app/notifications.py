@@ -176,21 +176,4 @@ def build_notifications(graph: GraphSubset, logs: list[ReasoningLog] | None = No
             }
         )
 
-    for log in logs or []:
-        if not log.trigger.startswith("scheduled_review"):
-            continue
-        items.append(
-            {
-                "id": f"review-log:{log.id}",
-                "kind": "system",
-                "title": "Care plan reviewed",
-                "body": log.conclusion or "Care plan was rechecked against records, pending actions, and caregiver feedback.",
-                "created_at": log.created_at.isoformat(),
-                "href": "/notifications",
-                "source_node_id": None,
-                "node_status": None,
-                "occurred_at": log.created_at.isoformat(),
-            }
-        )
-
     return sorted(items, key=lambda item: item["created_at"], reverse=True)

@@ -25,8 +25,6 @@ def _install_test_app(monkeypatch):
         main,
         "settings",
         Settings(
-            legacy_demo_enabled=False,
-            scheduled_review_enabled=False,
             api_write_key=API_KEY,
             openai_api_key="test-openai-key",
             google_calendar_access_token=None,

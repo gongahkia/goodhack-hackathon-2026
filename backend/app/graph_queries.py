@@ -13,7 +13,7 @@ def backtrace_sources(node: Node, nodes: list[Node], edges: list[Edge]) -> list[
             source = by_id.get(edge.to_node)
             if not source:
                 continue
-            if source.type in {"nehr_record", "caregiver_note", "care_intent", "decision_forecast"}:
+            if source.type in {"caregiver_note", "care_intent", "decision_forecast"}:
                 sources.append(source)
             elif source.type == "inferred_condition":
                 sources.extend(backtrace_sources(source, nodes, edges))

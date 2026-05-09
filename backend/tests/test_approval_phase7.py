@@ -169,7 +169,7 @@ def test_phase7_routes_patch_daily_task_and_approve_appointment(monkeypatch):
 
     store.init = fake_init
     monkeypatch.setattr(main, "store", store)
-    monkeypatch.setattr(main, "settings", Settings(legacy_demo_enabled=False, scheduled_review_enabled=False))
+    monkeypatch.setattr(main, "settings", Settings())
 
     async def seed():
         task = await store.create_node(

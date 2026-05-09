@@ -19,13 +19,48 @@ The backend:
 backend/                 FastAPI backend, graph store, transcription pipeline, tests
 backend/sql/schema.sql   Postgres schema for graph nodes, edges, logs, and state
 data/                    Curated fallback catalogs for grants, resources, and trajectories
+docs/ARCHITECTURE.md     Mermaid architecture diagrams and roadmap validation
 docs/API_VERIFICATION.md Manual curl verification and API test coverage
 docs/CI_CD.md            Backend CI workflow and testing conventions
+docs/DEMO.md             Full demo and live E2E runbook
 docs/LEARNING_HARNESS.md Context engineering, model evaluation, and prompt candidate workflow
 ROADMAP.md               Backend architecture and implementation phases
 ```
 
 The previous frontend code has been removed. Current development and verification should target the backend API directly.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Client["Frontend / API client"] --> API["FastAPI backend"]
+    API --> Store["GraphStore\nMemory or Postgres"]
+    API --> OpenAI["OpenAI transcription"]
+    API --> Research["Curated + live research tools"]
+    API --> Calendar["Google Calendar"]
+
+    OpenAI --> Transcript["transcript"]
+    Transcript --> Redaction["PII redaction"]
+    Redaction --> Triage["entity extraction + triage"]
+    Triage --> Daily["daily_task"]
+    Triage --> Appointment["appointment_candidate"]
+    Triage --> ResearchTask["ad_hoc_research_task"]
+    Daily --> Conflict["schedule_conflict + notification"]
+    Appointment --> CalendarWrite["approved calendar_write_request"]
+    ResearchTask --> Recommendation["synthesized_recommendation"]
+
+    Daily --> Store
+    Appointment --> Store
+    ResearchTask --> Store
+    Conflict --> Store
+    Recommendation --> Store
+```
+
+Full diagrams and roadmap validation:
+
+```bash
+open docs/ARCHITECTURE.md
+```
 
 ## Setup
 
@@ -78,7 +113,7 @@ SEALION_TRANSCRIPT_REVIEW_ENABLED=true
 
 When any API key is configured, patient/caregiver read endpoints require either `X-API-Key` or `X-Clinician-Key`; mutating endpoints require the write key. In `APP_ENV=pilot` or `APP_ENV=production`, `API_READ_KEY`, `API_WRITE_KEY`, and `DATA_ENCRYPTION_KEY` are required at startup. `GET /health` stays public and intentionally returns only a minimal service status.
 
-When `DATA_ENCRYPTION_KEY` is set, sensitive persisted fields such as raw transcripts, normalized transcripts, placeholder maps, calendar payloads, raw NEHR content, and provider errors are encrypted at rest. Normal API responses redact raw transcript fields and placeholder maps.
+When `DATA_ENCRYPTION_KEY` is set, sensitive persisted fields such as raw transcripts, normalized transcripts, placeholder maps, calendar payloads, and provider errors are encrypted at rest. Normal API responses redact raw transcript fields and placeholder maps.
 
 Without `DATABASE_URL`, the backend uses an in-memory graph store. Server reloads clear in-memory sessions.
 
@@ -122,10 +157,10 @@ Learning harness notes:
 open docs/LEARNING_HARNESS.md
 ```
 
-Google Calendar demo runbook:
+Full demo and live E2E runbook:
 
 ```bash
-open docs/GOOGLE_CALENDAR_DEMO.md
+open docs/DEMO.md
 ```
 
 Health check:
@@ -162,4 +197,4 @@ Core transcript-first endpoints:
 - `POST /privacy/incidents`
 - `POST /privacy/retention/purge`
 
-Legacy NEHR/demo routes are disabled by default unless `LEGACY_DEMO_ENABLED=true`.
+Legacy NEHR/demo routes and raw NEHR storage have been removed. The active runtime flow starts from caregiver transcripts.

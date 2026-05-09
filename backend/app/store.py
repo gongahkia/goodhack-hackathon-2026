@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 
-from .models import Edge, GraphSubset, NehrRecordRaw, Node, ReasoningLog
+from .models import Edge, GraphSubset, Node, ReasoningLog
 from .storage_security import FieldCrypto
 
 
@@ -21,9 +21,6 @@ def utcnow() -> datetime:
 class GraphStore(ABC):
     @abstractmethod
     async def init(self) -> None: ...
-
-    @abstractmethod
-    async def reset_demo(self) -> None: ...
 
     @abstractmethod
     async def create_reasoning_log(self, trigger: str) -> ReasoningLog: ...
@@ -39,14 +36,6 @@ class GraphStore(ABC):
 
     @abstractmethod
     async def get_reasoning_log(self, log_id: UUID) -> ReasoningLog | None: ...
-
-    @abstractmethod
-    async def insert_nehr_raw(
-        self, patient_id: str, record_type: str, content: dict[str, Any], recorded_at: datetime
-    ) -> NehrRecordRaw: ...
-
-    @abstractmethod
-    async def list_nehr_raw(self, patient_id: str, since: datetime | None = None) -> list[NehrRecordRaw]: ...
 
     @abstractmethod
     async def create_node(
@@ -111,19 +100,11 @@ class MemoryGraphStore(GraphStore):
         self.nodes: dict[UUID, Node] = {}
         self.edges: dict[UUID, Edge] = {}
         self.logs: dict[UUID, ReasoningLog] = {}
-        self.raw: dict[UUID, NehrRecordRaw] = {}
         self.system_state: dict[str, dict[str, Any]] = {}
         self.crypto = FieldCrypto(encryption_key)
 
     async def init(self) -> None:
         return None
-
-    async def reset_demo(self) -> None:
-        self.nodes.clear()
-        self.edges.clear()
-        self.logs.clear()
-        self.raw.clear()
-        self.system_state.clear()
 
     async def create_reasoning_log(self, trigger: str) -> ReasoningLog:
         log = ReasoningLog(id=uuid4(), trigger=trigger, steps=[], conclusion=None, created_at=utcnow())
@@ -143,25 +124,6 @@ class MemoryGraphStore(GraphStore):
 
     async def get_reasoning_log(self, log_id: UUID) -> ReasoningLog | None:
         return self.logs.get(log_id)
-
-    async def insert_nehr_raw(
-        self, patient_id: str, record_type: str, content: dict[str, Any], recorded_at: datetime
-    ) -> NehrRecordRaw:
-        row = NehrRecordRaw(
-            id=uuid4(),
-            patient_id=patient_id,
-            record_type=record_type,
-            content=self.crypto.encrypt_payload({"content": content})["content"],
-            recorded_at=recorded_at,
-            ingested_at=utcnow(),
-        )
-        self.raw[row.id] = row
-        return row.model_copy(update={"content": self.crypto.decrypt_payload({"content": row.content})["content"]})
-
-    async def list_nehr_raw(self, patient_id: str, since: datetime | None = None) -> list[NehrRecordRaw]:
-        rows = [row for row in self.raw.values() if row.patient_id == patient_id and (since is None or row.recorded_at >= since)]
-        decrypted = [row.model_copy(update={"content": self.crypto.decrypt_payload({"content": row.content})["content"]}) for row in rows]
-        return sorted(decrypted, key=lambda item: item.recorded_at, reverse=True)
 
     async def create_node(
         self,
@@ -286,10 +248,6 @@ class PostgresGraphStore(GraphStore):
             async with conn.transaction():
                 yield conn
 
-    async def reset_demo(self) -> None:
-        async with self._conn().acquire() as conn:
-            await conn.execute("truncate edges, nodes, reasoning_logs, nehr_records_raw, system_state restart identity cascade")
-
     async def create_reasoning_log(self, trigger: str) -> ReasoningLog:
         async with self._conn().acquire() as conn:
             row = await conn.fetchrow(
@@ -324,39 +282,6 @@ class PostgresGraphStore(GraphStore):
         async with self._conn().acquire() as conn:
             row = await conn.fetchrow("select * from reasoning_logs where id = $1", log_id)
         return _log(row) if row else None
-
-    async def insert_nehr_raw(
-        self, patient_id: str, record_type: str, content: dict[str, Any], recorded_at: datetime
-    ) -> NehrRecordRaw:
-        async with self._conn().acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                insert into nehr_records_raw (id, patient_id, record_type, content, recorded_at)
-                values ($1, $2, $3, $4::jsonb, $5)
-                returning *
-                """,
-                uuid4(),
-                patient_id,
-                record_type,
-                json.dumps(self.crypto.encrypt_payload({"content": content})["content"]),
-                recorded_at,
-            )
-        raw = _raw(row)
-        return raw.model_copy(update={"content": self.crypto.decrypt_payload({"content": raw.content})["content"]})
-
-    async def list_nehr_raw(self, patient_id: str, since: datetime | None = None) -> list[NehrRecordRaw]:
-        query = "select * from nehr_records_raw where patient_id = $1"
-        args: list[Any] = [patient_id]
-        if since:
-            query += " and recorded_at >= $2"
-            args.append(since)
-        query += " order by recorded_at desc"
-        async with self._conn().acquire() as conn:
-            rows = await conn.fetch(query, *args)
-        return [
-            raw.model_copy(update={"content": self.crypto.decrypt_payload({"content": raw.content})["content"]})
-            for raw in (_raw(row) for row in rows)
-        ]
 
     async def create_node(
         self,
@@ -528,10 +453,6 @@ def _edge(row: Any) -> Edge:
 
 def _log(row: Any) -> ReasoningLog:
     return ReasoningLog(**dict(row))
-
-
-def _raw(row: Any) -> NehrRecordRaw:
-    return NehrRecordRaw(**dict(row))
 
 
 def _state(row: Any) -> dict[str, Any]:

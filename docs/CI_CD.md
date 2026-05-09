@@ -45,7 +45,6 @@ Run the same core checks locally:
 ```bash
 backend/.venv/bin/python -m json.tool data/grants_singapore.json >/dev/null
 backend/.venv/bin/python -m json.tool data/educational_resources.json >/dev/null
-backend/.venv/bin/python -m json.tool data/condition_trajectories.json >/dev/null
 backend/.venv/bin/python -m json.tool data/singapore_support_corpus.json >/dev/null
 TINYFISH_API_KEY= SEALION_API_KEY= EXA_API_KEY= OPENAI_API_KEY= DATABASE_URL= backend/.venv/bin/python -m pytest backend/tests
 ```

@@ -20,7 +20,7 @@ def _install_test_app(monkeypatch):
 
     store.init = fake_init
     monkeypatch.setattr(main, "store", store)
-    monkeypatch.setattr(main, "settings", Settings(api_write_key=API_KEY, legacy_demo_enabled=False, scheduled_review_enabled=False))
+    monkeypatch.setattr(main, "settings", Settings(api_write_key=API_KEY))
     return store
 
 

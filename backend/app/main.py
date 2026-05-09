@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-import asyncio
-from contextlib import suppress
-from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-from .agent.loop import run_agent_for_trigger
 from .approvals import approve_appointment_calendar_write, update_daily_task
 from .compliance import (
     ConsentRecordCreate,
@@ -21,14 +17,14 @@ from .compliance import (
     record_processing_activity,
 )
 from .config import get_settings
-from .demo import PATIENT, PATIENT_ID, ingest_trigger_records, seed_baseline
 from .eval import evaluate_care_plan
 from .extraction import process_redacted_transcript
-from .graph_queries import backtrace_sources, forward_actions
+from .graph_queries import backtrace_sources
 from .identity import ensure_patient_identity, known_people_for_redaction, learn_alias_candidates_from_transcript, upsert_patient_alias
 from .learning import build_learning_context, create_model_evaluation, create_prompt_candidate, list_model_evaluations, list_prompt_candidates
 from .models import CaregiverNoteCreate, ClarificationUpdate, HumanEvaluationCreate, IdentityAliasCreate, ModelEvaluationCreate, Node, NodeEdit, PromptCandidateCreate, StatusUpdate
 from .notifications import build_notifications
+from .patient import PATIENT, PATIENT_ID
 from .privacy import PiiRedactor, sanitize_audit_payload
 from .research import run_guarded_research_pipeline
 from .scheduler import run_next_day_schedule_check
@@ -87,19 +83,6 @@ async def startup() -> None:
     if "*" in [origin.strip() for origin in settings.cors_origins.split(",")]:
         raise RuntimeError("CORS_ORIGINS must be explicit when credentials are enabled.")
     await store.init()
-    if settings.legacy_demo_enabled and not await store.list_nodes(PATIENT_ID):
-        await rebuild_care_plan()
-    if settings.legacy_demo_enabled and settings.scheduled_review_enabled:
-        app.state.scheduled_review_task = asyncio.create_task(scheduled_review_loop())
-
-
-@app.on_event("shutdown")
-async def shutdown() -> None:
-    task = getattr(app.state, "scheduled_review_task", None)
-    if task:
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
 
 
 @app.get("/health")
@@ -129,78 +112,6 @@ def require_clinician_access(x_clinician_key: str | None = Header(default=None),
     require_write_access(x_api_key)
 
 
-def require_legacy_demo_enabled() -> None:
-    if not settings.legacy_demo_enabled:
-        raise HTTPException(410, "Legacy NEHR/demo runtime paths are disabled. Use transcript-first ingestion.")
-
-
-@app.post("/demo/reset", dependencies=[Depends(require_write_access)])
-async def reset_demo() -> dict:
-    require_legacy_demo_enabled()
-    return await rebuild_care_plan()
-
-
-@app.post("/demo/ingest", dependencies=[Depends(require_write_access)])
-async def ingest_demo() -> dict:
-    require_legacy_demo_enabled()
-    result = await ingest_trigger_records(store)
-    agent_result = await run_agent_for_trigger(store, settings, PATIENT_ID, result["node_ids"][0])
-    return {**result, "agent": agent_result}
-
-
-async def rebuild_care_plan() -> dict:
-    require_legacy_demo_enabled()
-    baseline = await seed_baseline(store)
-    trigger = await ingest_trigger_records(store)
-    agent_result = await run_agent_for_trigger(store, settings, PATIENT_ID, trigger["node_ids"][0])
-    return {**baseline, "trigger": trigger, "agent": agent_result}
-
-
-async def scheduled_review_loop() -> None:
-    while True:
-        await asyncio.sleep(max(60, settings.scheduled_review_interval_seconds))
-        with suppress(Exception):
-            await run_scheduled_review(force=False)
-
-
-async def run_scheduled_review(force: bool = False) -> dict:
-    if not settings.legacy_demo_enabled:
-        return {"skipped": True, "reason": "legacy_demo_disabled"}
-    lock_key = "scheduled_review"
-    if not force and not await store.acquire_system_lock(lock_key, settings.scheduled_review_lock_ttl_seconds):
-        state = await store.get_system_state(lock_key)
-        return {"skipped": True, "reason": "scheduled_review_lock_held", "state": state}
-    graph = await store.graph_subset(PATIENT_ID)
-    logs = await store.list_reasoning_logs()
-    review = build_care_plan_review(graph, logs)
-    log = await store.create_reasoning_log("scheduled_review")
-    conclusion = " ".join(review["narrative"][:3])
-    await store.append_reasoning_step(
-        log.id,
-        {
-            "kind": "care_plan_review",
-            "record_count": review["record_count"],
-            "condition_count": review["condition_count"],
-            "pending_review_count": review["pending_review_count"],
-            "upcoming_30_day_count": review["upcoming_30_day_count"],
-            "memory_instructions": review["memory_instructions"],
-        },
-    )
-    await store.finish_reasoning_log(log.id, conclusion)
-    await store.set_system_state(
-        lock_key,
-        {
-            "last_run_at": datetime.now(UTC).isoformat(),
-            "last_reasoning_log_id": str(log.id),
-            "last_conclusion": conclusion,
-            "record_count": review["record_count"],
-            "pending_review_count": review["pending_review_count"],
-        },
-        locked_until=None,
-    )
-    return {"reasoning_log_id": str(log.id), "conclusion": conclusion, "review": review}
-
-
 @app.get("/patient/summary", dependencies=[Depends(require_read_access)])
 async def patient_summary() -> dict:
     graph = await store.graph_subset(PATIENT_ID, ["inferred_condition"])
@@ -228,30 +139,6 @@ async def create_patient_alias(alias: IdentityAliasCreate) -> dict:
         alias.status,
     )
     return sanitize_public(identity.model_dump(mode="json"))
-
-
-@app.get("/records", dependencies=[Depends(require_read_access)])
-async def records() -> list[dict]:
-    require_legacy_demo_enabled()
-    graph = await store.graph_subset(PATIENT_ID)
-    record_nodes = [node for node in graph.nodes if node.type == "nehr_record"]
-    return sanitize_public([
-        {**node.model_dump(mode="json"), "forward_actions": [action.model_dump(mode="json") for action in forward_actions(node, graph.nodes, graph.edges)]}
-        for node in record_nodes
-    ])
-
-
-@app.get("/records/{record_id}", dependencies=[Depends(require_read_access)])
-async def record_detail(record_id: UUID) -> dict:
-    require_legacy_demo_enabled()
-    graph = await store.graph_subset(PATIENT_ID)
-    node = await store.get_node(record_id)
-    if not node:
-        raise HTTPException(404, "Record not found")
-    return sanitize_public({
-        **node.model_dump(mode="json"),
-        "forward_actions": [action.model_dump(mode="json") for action in forward_actions(node, graph.nodes, graph.edges)],
-    })
 
 
 @app.get("/events", dependencies=[Depends(require_read_access)])
@@ -313,11 +200,6 @@ async def care_plan_review() -> dict:
     graph = await store.graph_subset(PATIENT_ID)
     logs = await store.list_reasoning_logs()
     return sanitize_public(build_care_plan_review(graph, logs))
-
-
-@app.post("/care-plan/rereason", dependencies=[Depends(require_write_access)])
-async def care_plan_rereason() -> dict:
-    return await run_scheduled_review(force=True)
 
 
 @app.get("/forecast", dependencies=[Depends(require_read_access)])

@@ -132,7 +132,7 @@ def test_process_transcription_endpoint_auto_redacts_extracts_and_triages(monkey
 
     store.init = fake_init
     monkeypatch.setattr(main, "store", store)
-    monkeypatch.setattr(main, "settings", Settings(legacy_demo_enabled=False, scheduled_review_enabled=False))
+    monkeypatch.setattr(main, "settings", Settings())
 
     async def seed_graph():
         session = await store.create_node("transcription_session", {"patient_id": "mdm-tan"}, "user", status="approved")

@@ -295,7 +295,11 @@ def _memory_profile_payload(patient_id: str, profile: dict[str, Any]) -> dict[st
 def build_care_plan_review(graph: GraphSubset, logs: list[ReasoningLog]) -> dict[str, Any]:
     now = datetime.now(UTC)
     actions = [node for node in graph.nodes if node.type == "scheduled_action" and node.status != "dismissed"]
-    records = [node for node in graph.nodes if node.type == "nehr_record"]
+    source_nodes = [
+        node
+        for node in graph.nodes
+        if node.type in {"transcript", "caregiver_note", "care_intent", "decision_forecast", "appointment_candidate", "daily_task", "ad_hoc_research_task"}
+    ]
     conditions = [node for node in graph.nodes if node.type == "inferred_condition"]
     pending = [node for node in actions if node.status == "pending_review"]
     upcoming = sorted(
@@ -311,7 +315,7 @@ def build_care_plan_review(graph: GraphSubset, logs: list[ReasoningLog]) -> dict
     latest_log = logs[0] if logs else None
 
     narrative = [
-        f"I rechecked {len(records)} source records and {len(conditions)} inferred condition{'s' if len(conditions) != 1 else ''}.",
+        f"I rechecked {len(source_nodes)} transcript-first source node{'s' if len(source_nodes) != 1 else ''} and {len(conditions)} inferred condition{'s' if len(conditions) != 1 else ''}.",
         f"There are {len(pending)} care action{'s' if len(pending) != 1 else ''} still waiting for review.",
         f"{len(next_30)} active action{'s' if len(next_30) != 1 else ''} fall within the next 30 days.",
     ]
@@ -323,7 +327,7 @@ def build_care_plan_review(graph: GraphSubset, logs: list[ReasoningLog]) -> dict
 
     return {
         "generated_at": now.isoformat(),
-        "record_count": len(records),
+        "source_node_count": len(source_nodes),
         "condition_count": len(conditions),
         "pending_review_count": len(pending),
         "upcoming_30_day_count": len(next_30),
@@ -1124,7 +1128,7 @@ async def _decision_research_sources(topic: str, settings: Settings | None) -> l
     if "wheelchair" in topic.lower() or "mobility" in topic.lower():
         queries.append("mobility aid wheelchair")
     sources: list[dict[str, Any]] = []
-    effective_settings = settings or Settings(demo_agent_mode="scripted")
+    effective_settings = settings or Settings()
     for query in queries:
         grants = await search_verified_grants(query, effective_settings)
         resources = await search_verified_resources(query, effective_settings)
@@ -1339,7 +1343,7 @@ def _recurring_care_concerns(graph: GraphSubset, event: Node) -> list[str]:
     terms = [
         str(node.payload.get("feedback_note") or node.payload.get("title") or node.payload.get("description") or "")
         for node in graph.nodes
-        if node.type in {"caregiver_feedback", "scheduled_action", "nehr_record"}
+        if node.type in {"caregiver_feedback", "scheduled_action", "caregiver_note", "care_intent", "decision_forecast"}
     ]
     text = " ".join(terms).lower()
     concerns = []

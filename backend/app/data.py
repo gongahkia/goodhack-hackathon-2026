@@ -13,11 +13,6 @@ def _read_json(filename: str) -> Any:
 
 
 @lru_cache
-def condition_trajectories() -> dict[str, Any]:
-    return _read_json("condition_trajectories.json")
-
-
-@lru_cache
 def grants_database() -> list[dict[str, Any]]:
     return _read_json("grants_singapore.json")
 

@@ -28,8 +28,6 @@ def _install_test_app(monkeypatch, settings: Settings | None = None):
         or Settings(
             api_write_key=API_KEY,
             clinician_review_key=CLINICIAN_KEY,
-            legacy_demo_enabled=False,
-            scheduled_review_enabled=False,
         ),
     )
     return store

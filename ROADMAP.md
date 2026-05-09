@@ -691,6 +691,29 @@ Production quality metrics:
 - research source validity
 - recommendation approval/edit/dismissal rate
 
+## Current Implementation Validation
+
+Status as of 2026-05-10: the roadmap is implemented for the backend MVP and demo flow, with a few production gaps intentionally left outside the current implementation.
+
+Done:
+
+- Phase 1 graph foundation: transcript-first node and edge types exist in `backend/app/models.py` and `backend/sql/schema.sql`.
+- Phase 2 runtime removal: legacy NEHR/demo routes, raw NEHR storage, scripted demo agent modules, and demo fixtures are physically deleted.
+- Phase 3 transcription-first ingestion: `/transcriptions`, `/transcribe`, OpenAI/Groq/local provider paths, multilingual normalization, transcript persistence, redaction, and placeholder maps exist.
+- Phase 4 extraction and triage: strict entity models, daily task, appointment candidate, ad hoc research task, multi-bucket transcript support, and speculative-research blocking exist.
+- Phase 5 scheduler: fixed/movable semantics, medication spacing checks, next-day-only Google Calendar reads, persisted `schedule_conflict` nodes, and `notification_candidate` nodes exist.
+- Phase 6 guarded research: planner, guardrail review, curated corpus plus live-tool adapters, source tiers, freshness metadata, and synthesized recommendations exist.
+- Phase 7 approval workflows: daily task edits, caregiver feedback nodes, appointment approval, Google Calendar insert, and audited write success/failure states exist.
+- Evaluation coverage: `backend/tests/test_full_backend_e2e.py` covers first transcription through all three buckets, mocked calendar write, mocked conflict detection, research, recommendations, and notifications.
+
+Remaining production gaps:
+
+- The 22:00 Asia/Singapore scheduler exists as a callable endpoint/job function, but no production cron/background scheduler is wired yet.
+- Google Calendar uses an operator-provided access token for the demo; a production OAuth refresh-token flow is not implemented.
+- Google Calendar read/write permissions are not split into separate account-link flows yet.
+- Conflict resolution is indirect through daily-task edits and scheduler reruns; there is no first-class `/schedule-conflicts/{id}/resolve` endpoint yet.
+- Legacy NEHR/demo code has been physically deleted from the active backend and tests.
+
 ## Change Log
 
 - 2026-05-09: Rewrote roadmap around transcription-first backend architecture.
@@ -701,9 +724,10 @@ Production quality metrics:
 - 2026-05-09: Added next-day-only Google Calendar deconfliction and 10pm Singapore conflict notification job.
 - 2026-05-09: Added guarded research pipeline with planner, auditor, tools, and synthesis stages.
 - 2026-05-09: Implemented Phase 1 graph foundation by adding transcript-first node and edge types to backend models and Postgres schema while preserving existing graph store behavior.
-- 2026-05-09: Started Phase 3 before destructive Phase 2 removal so the backend has a working transcript-first ingestion path before old NEHR/demo runtime paths are quarantined.
+- 2026-05-09: Started Phase 3 before destructive Phase 2 removal so the backend had a working transcript-first ingestion path before old NEHR/demo runtime paths were removed.
 - 2026-05-09: Added OpenAI audio transcription provider support, transcription-session/transcript graph persistence, local direct-identifier transcript redaction, placeholder maps, and rehydration validation.
-- 2026-05-09: Implemented Phase 2 runtime quarantine by disabling NEHR/demo bootstrapping, demo ingest/reset endpoints, NEHR record endpoints, and scheduled demo review unless `LEGACY_DEMO_ENABLED=true`.
+- 2026-05-09: Temporarily quarantined Phase 2 runtime paths by disabling NEHR/demo bootstrapping, demo ingest/reset endpoints, NEHR record endpoints, and scheduled demo review.
+- 2026-05-10: Completed destructive Phase 2 removal by deleting legacy NEHR/demo routes, raw NEHR storage, scripted demo agent modules, legacy fixtures, and the quarantine-only config flags.
 - 2026-05-09: Implemented Phase 4 extraction and triage with strict entity schemas, conservative daily/ad hoc/appointment bucket classification, graph artifact creation, and guardrail logic blocking speculative research from simple medication reminders.
 - 2026-05-09: Implemented Phase 5 daily scheduler with next-day-only Google Calendar read adapter, fixed/movable conflict classification, three-times-daily medication spacing checks, persisted schedule conflict nodes, notification candidates, and polling-friendly notification output.
 - 2026-05-09: Implemented Phase 6 guarded research pipeline with redacted research planning, guardrail approval/blocking, TinyFish/Exa-capable source-tier adapters, citation freshness capture, strict synthesized recommendation schema, and recommendation polling.

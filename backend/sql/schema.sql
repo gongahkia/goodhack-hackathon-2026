@@ -9,7 +9,6 @@ create table if not exists reasoning_logs (
 create table if not exists nodes (
   id uuid primary key,
   type text not null check (type in (
-    'nehr_record',
     'inferred_condition',
     'scheduled_action',
     'recommended_resource',
@@ -93,7 +92,6 @@ create table if not exists edges (
 
 alter table nodes drop constraint if exists nodes_type_check;
 alter table nodes add constraint nodes_type_check check (type in (
-  'nehr_record',
   'inferred_condition',
   'scheduled_action',
   'recommended_resource',
@@ -167,14 +165,7 @@ alter table edges add constraint edges_type_check check (type in (
   'retention_applied'
 ));
 
-create table if not exists nehr_records_raw (
-  id uuid primary key,
-  patient_id text not null,
-  record_type text not null check (record_type in ('diagnosis', 'prescription', 'lab_result', 'doctor_note', 'appointment')),
-  content jsonb not null,
-  recorded_at timestamptz not null,
-  ingested_at timestamptz default now()
-);
+drop table if exists nehr_records_raw cascade;
 
 create table if not exists system_state (
   key text primary key,
@@ -188,7 +179,6 @@ create index if not exists idx_nodes_patient on nodes((payload->>'patient_id'));
 create index if not exists idx_edges_from on edges(from_node);
 create index if not exists idx_edges_to on edges(to_node);
 create index if not exists idx_edges_type on edges(type);
-create index if not exists idx_nehr_patient_recorded on nehr_records_raw(patient_id, recorded_at desc);
 create index if not exists idx_system_state_locked_until on system_state(locked_until);
 
 create or replace function validate_scheduled_action_provenance()
@@ -202,9 +192,9 @@ begin
     join nodes source on source.id = e.to_node
     where e.from_node = new.id
       and e.type = 'derived_from'
-      and source.type in ('nehr_record', 'inferred_condition', 'caregiver_note', 'care_intent', 'decision_forecast')
+      and source.type in ('inferred_condition', 'caregiver_note', 'care_intent', 'decision_forecast')
   ) then
-    raise exception 'scheduled_action % must have a derived_from edge to a nehr_record or inferred_condition', new.id;
+    raise exception 'scheduled_action % must have a derived_from edge to a transcript-first source node', new.id;
   end if;
 
   return new;
