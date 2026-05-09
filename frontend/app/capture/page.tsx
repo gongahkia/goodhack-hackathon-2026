@@ -13,29 +13,6 @@ const examples = [
   "doctor said consider wheelchair, decide by 15 June"
 ];
 
-type BrowserSpeechRecognition = {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  maxAlternatives: number;
-  onstart: (() => void) | null;
-  onend: (() => void) | null;
-  onerror: ((event: { error?: string }) => void) | null;
-  onresult: ((event: SpeechRecognitionResultEvent) => void) | null;
-  start: () => void;
-  stop: () => void;
-};
-
-type SpeechRecognitionResultEvent = {
-  resultIndex: number;
-  results: ArrayLike<{
-    isFinal: boolean;
-    0: { transcript: string; confidence: number };
-  }>;
-};
-
-type SpeechRecognitionConstructor = new () => BrowserSpeechRecognition;
-
 export default function CapturePage() {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -43,65 +20,87 @@ export default function CapturePage() {
   const [result, setResult] = useState<CaregiverNoteResult | null>(null);
   const [speechSupported, setSpeechSupported] = useState(false);
   const [listening, setListening] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
   const [transcriptMeta, setTranscriptMeta] = useState<string | null>(null);
-  const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
   const baseTextRef = useRef("");
 
   useEffect(() => {
-    const speechWindow = window as Window & {
-      SpeechRecognition?: SpeechRecognitionConstructor;
-      webkitSpeechRecognition?: SpeechRecognitionConstructor;
+    setSpeechSupported(Boolean(typeof navigator.mediaDevices?.getUserMedia === "function"));
+    return () => {
+      if (recorderRef.current && recorderRef.current.state !== "inactive") {
+        recorderRef.current.stop();
+      }
+      streamRef.current?.getTracks().forEach((track) => track.stop());
     };
-    setSpeechSupported(Boolean(speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition));
-    return () => recognitionRef.current?.stop();
   }, []);
 
-  function startListening() {
-    const speechWindow = window as Window & {
-      SpeechRecognition?: SpeechRecognitionConstructor;
-      webkitSpeechRecognition?: SpeechRecognitionConstructor;
-    };
-    const Recognition = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
-    if (!Recognition) {
-      setError("Speech recognition is not available in this browser. Use Chrome, Edge, or Safari, or paste the note.");
-      return;
-    }
-    recognitionRef.current?.stop();
-    const recognition = new Recognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.maxAlternatives = 1;
-    recognition.lang = "en-SG";
-    baseTextRef.current = text.trim();
-    recognition.onstart = () => {
-      setListening(true);
-      setTranscriptMeta("Listening in English (Singapore).");
-    };
-    recognition.onerror = (event) => {
-      setError(`Microphone transcription failed${event.error ? `: ${event.error}` : "."}`);
+  async function startListening() {
+    try {
+      setError(null);
+      chunksRef.current = [];
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const recorder = new MediaRecorder(stream);
+      recorderRef.current = recorder;
+      baseTextRef.current = text.trim();
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          chunksRef.current.push(event.data);
+        }
+      };
+      recorder.onstart = () => {
+        setListening(true);
+        setTranscriptMeta("Recording. Transcription starts when you stop.");
+      };
+      recorder.onerror = () => {
+        setError("Microphone recording failed. Check browser microphone permission.");
+        setListening(false);
+      };
+      recorder.onstop = async () => {
+        setListening(false);
+        stream.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+        const audio = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        chunksRef.current = [];
+        if (audio.size > 0) {
+          await transcribeAudio(audio);
+        }
+      };
+      recorder.start();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to access microphone.");
       setListening(false);
-    };
-    recognition.onend = () => setListening(false);
-    recognition.onresult = (event) => {
-      let transcript = "";
-      let bestConfidence = 0;
-      for (let index = event.resultIndex; index < event.results.length; index += 1) {
-        const resultItem = event.results[index];
-        transcript += resultItem[0].transcript;
-        bestConfidence = Math.max(bestConfidence, resultItem[0].confidence || 0);
-      }
-      setText([baseTextRef.current, transcript.trim()].filter(Boolean).join(" "));
-      if (bestConfidence > 0) {
-        setTranscriptMeta(`Transcribing with browser speech model · confidence ${Math.round(bestConfidence * 100)}%`);
-      }
-    };
-    recognitionRef.current = recognition;
-    recognition.start();
+    }
   }
 
   function stopListening() {
-    recognitionRef.current?.stop();
+    if (recorderRef.current && recorderRef.current.state !== "inactive") {
+      recorderRef.current.stop();
+      return;
+    }
     setListening(false);
+  }
+
+  async function transcribeAudio(audio: Blob) {
+    setTranscribing(true);
+    setTranscriptMeta("Transcribing audio...");
+    setError(null);
+    try {
+      const result = await api.transcribe(audio);
+      if (!result.text.trim()) {
+        setError("No speech was detected. Try recording closer to the microphone.");
+        return;
+      }
+      setText([baseTextRef.current, result.text.trim()].filter(Boolean).join(" "));
+      setTranscriptMeta(`Transcribed with ${result.provider} (${result.model}).`);
+    } catch (err) {
+      setError(err instanceof Error ? `Microphone transcription failed: ${err.message}` : "Microphone transcription failed.");
+    } finally {
+      setTranscribing(false);
+    }
   }
 
   async function submit() {
@@ -138,11 +137,11 @@ export default function CapturePage() {
           <div className="mt-3 grid grid-cols-2 gap-2">
             <button
               className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-[#cbd8cf] bg-white px-3 py-2 text-sm font-semibold text-moss disabled:opacity-60"
-              disabled={!speechSupported || listening}
+              disabled={!speechSupported || listening || transcribing}
               onClick={startListening}
               type="button"
             >
-              <Mic className="h-4 w-4" /> Start mic
+              <Mic className="h-4 w-4" /> Record mic
             </button>
             <button
               className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-[#cbd8cf] bg-white px-3 py-2 text-sm font-semibold text-moss disabled:opacity-60"
@@ -154,7 +153,7 @@ export default function CapturePage() {
             </button>
           </div>
           <p className="mt-2 text-xs text-[#66726a]">
-            {speechSupported ? transcriptMeta || "Uses the browser's built-in speech recognition model. No app API key is required." : "Mic transcription is not supported in this browser; typed capture still works."}
+            {speechSupported ? transcriptMeta || "Record in the browser, transcribe through the backend, or use phone keyboard dictation in the text box." : "Mic recording is not supported in this browser; typed capture still works."}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             {examples.map((example) => (

@@ -4,7 +4,7 @@ import asyncio
 from contextlib import suppress
 from uuid import UUID
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from .agent.loop import run_agent_for_trigger
@@ -16,6 +16,7 @@ from .models import CaregiverNoteCreate, NodeEdit, StatusUpdate
 from .notifications import build_notifications
 from .privacy import PiiRedactor, sanitize_audit_payload
 from .store import GraphStore, MemoryGraphStore, PostgresGraphStore
+from .transcription import TranscriptionError, transcribe_audio
 from .v2 import (
     build_appointment_prep,
     build_calendar_ics,
@@ -224,6 +225,15 @@ async def forecast() -> list[dict]:
 @app.post("/caregiver-notes")
 async def caregiver_notes(note: CaregiverNoteCreate) -> dict:
     return await process_caregiver_note(store, PATIENT_ID, note.text, note.recorded_at, settings)
+
+
+@app.post("/transcribe")
+async def transcribe(request: Request) -> dict:
+    try:
+        result = await transcribe_audio(await request.body(), request.headers.get("content-type"), settings)
+        return result.model_dump()
+    except TranscriptionError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
 
 
 @app.get("/resources/search")

@@ -12,6 +12,7 @@ from app.graph_queries import backtrace_sources, forward_actions
 from app.notifications import build_notifications
 from app.privacy import PiiRedactor, sanitize_audit_payload
 from app.store import MemoryGraphStore
+from app.transcription import TranscriptionInputError, transcribe_audio
 from app.v2 import (
     build_appointment_prep,
     build_calendar_ics,
@@ -571,6 +572,40 @@ async def test_caregiver_note_llm_extraction_uses_redacted_transcript(monkeypatc
     assert "PHONE_1" in payload
     assert intent["payload"]["intent_type"] == "symptom_note"
     assert intent["status"] == "clarification_required"
+
+
+@pytest.mark.asyncio
+async def test_local_transcription_uses_mlx_whisper(monkeypatch):
+    import sys
+    import types
+
+    fake_mlx = types.ModuleType("mlx_whisper")
+    captured: dict[str, object] = {}
+
+    def fake_transcribe(path: str, **kwargs):
+        captured["path"] = path
+        captured["kwargs"] = kwargs
+        assert Path(path).exists()
+        return {"text": "ask doctor about the new lump"}
+
+    fake_mlx.transcribe = fake_transcribe
+    monkeypatch.setitem(sys.modules, "mlx_whisper", fake_mlx)
+
+    result = await transcribe_audio(
+        b"fake webm bytes",
+        "audio/webm;codecs=opus",
+        Settings(transcription_provider="local", mlx_whisper_model="mlx-community/whisper-small-mlx", transcription_language="en"),
+    )
+
+    assert result.text == "ask doctor about the new lump"
+    assert result.provider == "mlx-whisper"
+    assert captured["kwargs"] == {"path_or_hf_repo": "mlx-community/whisper-small-mlx", "language": "en"}
+
+
+@pytest.mark.asyncio
+async def test_transcription_rejects_empty_audio():
+    with pytest.raises(TranscriptionInputError):
+        await transcribe_audio(b"", "audio/webm", Settings(transcription_provider="local"))
 
 
 @pytest.mark.asyncio

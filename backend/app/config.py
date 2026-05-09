@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     sealion_base_url: str = "https://api.sea-lion.ai/v1"
     sealion_model: str = "aisingapore/Gemma-SEA-LION-v4-27B-IT"
     sealion_guard_model: str = "aisingapore/SEA-Guard"
+    transcription_provider: str = "local"
+    mlx_whisper_model: str = "mlx-community/whisper-small-mlx"
+    groq_api_key: str | None = None
+    groq_transcription_model: str = "whisper-large-v3-turbo"
+    transcription_language: str = "en"
+    transcription_max_bytes: int = 25 * 1024 * 1024
+    transcription_timeout_seconds: int = 120
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     demo_agent_mode: str = "auto"
     scheduled_review_enabled: bool = False

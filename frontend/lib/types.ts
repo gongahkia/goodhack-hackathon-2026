@@ -173,3 +173,10 @@ export type CaregiverNoteResult = {
   scheduled_actions?: KgNode[];
   created: string[];
 };
+
+export type TranscriptionResult = {
+  text: string;
+  provider: string;
+  model: string;
+  language?: string | null;
+};

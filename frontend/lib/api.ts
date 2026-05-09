@@ -1,4 +1,4 @@
-import type { AppNotification, CaregiverNoteResult, CarePlanReview, EventDetail, ForecastItem, KgNode, MemoryProfile, PatientSummary, ReasoningLog, VerifiedContent } from "./types";
+import type { AppNotification, CaregiverNoteResult, CarePlanReview, EventDetail, ForecastItem, KgNode, MemoryProfile, PatientSummary, ReasoningLog, TranscriptionResult, VerifiedContent } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
@@ -17,6 +17,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function errorMessage(response: Response): Promise<string> {
+  const body = await response.text();
+  try {
+    const parsed = JSON.parse(body);
+    return typeof parsed.detail === "string" ? parsed.detail : body;
+  } catch {
+    return body;
+  }
+}
+
 export const api = {
   health: () => request<{ ok: boolean; store: string }>("/health"),
   summary: () => request<PatientSummary>("/patient/summary"),
@@ -29,6 +39,20 @@ export const api = {
   carePlanReview: () => request<CarePlanReview>("/care-plan/review"),
   carePlanRereason: () => request<{ reasoning_log_id: string; conclusion: string; review: CarePlanReview }>("/care-plan/rereason", { method: "POST" }),
   forecast: () => request<ForecastItem[]>("/forecast"),
+  transcribe: async (audio: Blob) => {
+    const response = await fetch(`${API_BASE}/transcribe`, {
+      method: "POST",
+      headers: {
+        "Content-Type": audio.type || "audio/webm"
+      },
+      body: audio,
+      cache: "no-store"
+    });
+    if (!response.ok) {
+      throw new Error(await errorMessage(response));
+    }
+    return response.json() as Promise<TranscriptionResult>;
+  },
   caregiverNote: (text: string) => request<CaregiverNoteResult>("/caregiver-notes", { method: "POST", body: JSON.stringify({ text }) }),
   resourceSearch: (topic: string, condition?: string) =>
     request<VerifiedContent[]>(`/resources/search?topic=${encodeURIComponent(topic)}${condition ? `&condition=${encodeURIComponent(condition)}` : ""}`),
