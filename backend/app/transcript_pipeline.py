@@ -6,9 +6,9 @@ from typing import Any
 from .config import Settings
 from .models import Node
 from .privacy import redact_transcript_direct_pii
+from .sealion_reviews import maybe_review_multilingual_transcript_with_sealion
 from .store import GraphStore
 from .transcription import TranscriptionError, TranscriptionInputError, normalize_transcript_to_english, transcribe_audio
-from .v2 import sealion_regional_review
 
 
 async def ingest_audio_transcription(
@@ -81,7 +81,7 @@ async def ingest_audio_transcription(
 
     normalization = await normalize_transcript_to_english(result.text, result.detected_language or result.language or result.requested_language, settings)
     received_at = datetime.now(UTC).isoformat()
-    await store.update_node_payload(
+    updated_session = await store.update_node_payload(
         session.id,
         {
             "status": "transcription_completed",
@@ -96,6 +96,7 @@ async def ingest_audio_transcription(
         },
         "approved",
     )
+    session = updated_session or session
     transcript = await store.create_node(
         "transcript",
         {
@@ -159,7 +160,9 @@ async def redact_stored_transcript(
     normalized_text = str(transcript.payload.get("normalized_english_text") or "").strip()
     source_text = normalized_text or raw_text
     redaction = redact_transcript_direct_pii(source_text, known_people)
-    original_redaction = redact_transcript_direct_pii(raw_text, known_people) if normalized_text else None
+    original_known_people = list(known_people or [])
+    original_known_people.extend(str(value) for value in redaction["placeholder_map"].values())
+    original_redaction = redact_transcript_direct_pii(raw_text, original_known_people) if normalized_text else None
     node = await store.create_node(
         "pii_redaction",
         {
@@ -195,59 +198,7 @@ async def redact_stored_transcript(
                 **redaction["privacy"],
             },
         )
-    await maybe_review_redacted_transcript_with_sealion(store, node, settings)
-    return node
-
-
-async def maybe_review_redacted_transcript_with_sealion(
-    store: GraphStore,
-    redaction: Node,
-    settings: Settings | None,
-) -> Node | None:
-    if not settings or not settings.sealion_transcript_review_enabled:
-        return None
-    patient_id = str(redaction.payload.get("patient_id") or "")
-    redacted_text = str(redaction.payload.get("redacted_text") or "")
-    review = await sealion_regional_review(
-        redacted_text,
-        settings,
-        task="redacted_transcript_care_reasoning_review",
-        target_language="English",
-        max_tokens=700,
-    )
-    node = await store.create_node(
-        "transcript_review",
-        {
-            "patient_id": patient_id,
-            "pii_redaction_id": str(redaction.id),
-            "provider": review.get("provider"),
-            "configured": review.get("configured"),
-            "model": review.get("model"),
-            "task": review.get("task") or "redacted_transcript_care_reasoning_review",
-            "result": review.get("result"),
-            "error": review.get("error"),
-            "input_privacy": "direct_pii_redacted",
-            "redacted_input_chars": len(redacted_text),
-            "created_at": datetime.now(UTC).isoformat(),
-        },
-        "agent",
-        reasoning_log_id=redaction.reasoning_log_id,
-        status="approved" if review.get("result") else "clarification_required",
-    )
-    await store.create_edge(node.id, redaction.id, "reviewed_from")
-    if redaction.reasoning_log_id:
-        await store.append_reasoning_step(
-            redaction.reasoning_log_id,
-            {
-                "kind": "sealion_transcript_review",
-                "pii_redaction_id": str(redaction.id),
-                "transcript_review_id": str(node.id),
-                "configured": review.get("configured"),
-                "provider": review.get("provider"),
-                "model": review.get("model"),
-                "input_privacy": "direct_pii_redacted",
-            },
-        )
+    await maybe_review_multilingual_transcript_with_sealion(store, node, settings)
     return node
 
 

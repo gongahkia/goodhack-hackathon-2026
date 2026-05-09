@@ -16,6 +16,7 @@ from .data import educational_resources, grants_database
 from .graph_queries import backtrace_sources
 from .models import GraphSubset, Node, ReasoningLog
 from .privacy import PiiRedactor
+from .security import sanitize_provider_error, vendor_allowed, vendor_blocked_response
 from .store import GraphStore
 
 DEFAULT_ALLOWED_DOMAINS = ["gov.sg", "healthhub.sg", "aic.sg", "sgenable.sg", "moh.gov.sg", "parkinson.org"]
@@ -1673,6 +1674,8 @@ def _scheduling_reason(timing_type: str, action_type: str) -> str:
 async def _verify_live_results_with_openai(results: list[dict[str, Any]], settings: Settings, query: str) -> list[dict[str, Any]]:
     if not results or not settings.live_search_llm_verification or settings.use_scripted_agent:
         return results
+    if not vendor_allowed(settings, "openai", "search_verification"):
+        return [{**result, "secondary_verification": "vendor_disabled"} for result in results]
     try:
         redactor = PiiRedactor()
         sanitized_input = redactor.redact({"query": query, "results": results})
@@ -1720,6 +1723,8 @@ async def exa_search_web(
     search_type: str = "auto",
 ) -> dict[str, Any]:
     domains = allowlist or DEFAULT_ALLOWED_DOMAINS
+    if not vendor_allowed(settings, "exa", "search"):
+        return vendor_blocked_response("exa", "search") | {"allowlist": domains}
     if not settings.exa_api_key:
         return {"provider": "exa", "configured": False, "results": [], "error": "EXA_API_KEY is not configured."}
     try:
@@ -1727,7 +1732,7 @@ async def exa_search_web(
         verified = await _verify_live_results_with_openai(results, settings, query)
         return {"provider": "exa", "configured": True, "allowlist": domains, "results": verified}
     except httpx.HTTPError as exc:
-        return {"provider": "exa", "configured": True, "allowlist": domains, "results": [], "error": str(exc)}
+        return {"provider": "exa", "configured": True, "allowlist": domains, "results": [], "error": sanitize_provider_error(exc)}
 
 
 async def tinyfish_search_web(
@@ -1738,6 +1743,8 @@ async def tinyfish_search_web(
     language: str = "en",
 ) -> dict[str, Any]:
     domains = allowlist or DEFAULT_ALLOWED_DOMAINS
+    if not vendor_allowed(settings, "tinyfish", "search"):
+        return vendor_blocked_response("tinyfish_search", "search") | {"allowlist": domains}
     if not settings.tinyfish_api_key:
         return {"provider": "tinyfish_search", "configured": False, "results": [], "error": "TINYFISH_API_KEY is not configured."}
     try:
@@ -1745,7 +1752,7 @@ async def tinyfish_search_web(
         verified = await _verify_live_results_with_openai(results, settings, query)
         return {"provider": "tinyfish_search", "configured": True, "allowlist": domains, "results": verified}
     except httpx.HTTPError as exc:
-        return {"provider": "tinyfish_search", "configured": True, "allowlist": domains, "results": [], "error": str(exc)}
+        return {"provider": "tinyfish_search", "configured": True, "allowlist": domains, "results": [], "error": sanitize_provider_error(exc)}
 
 
 async def tinyfish_fetch_urls(
@@ -1755,6 +1762,8 @@ async def tinyfish_fetch_urls(
     format: str = "markdown",
 ) -> dict[str, Any]:
     domains = allowlist or DEFAULT_ALLOWED_DOMAINS
+    if not vendor_allowed(settings, "tinyfish", "fetch"):
+        return vendor_blocked_response("tinyfish_fetch", "fetch") | {"allowlist": domains, "rejected_urls": urls[:10]}
     allowed_urls = [url for url in urls[:10] if _url_allowed(url, domains)]
     rejected_urls = [url for url in urls[:10] if url not in allowed_urls]
     if not settings.tinyfish_api_key:
@@ -1793,7 +1802,7 @@ async def tinyfish_fetch_urls(
             "results": [],
             "errors": [],
             "rejected_urls": rejected_urls,
-            "error": str(exc),
+            "error": sanitize_provider_error(exc),
         }
 
 
@@ -1804,6 +1813,8 @@ async def jina_read_url(
     max_chars: int = 5000,
 ) -> dict[str, Any]:
     domains = allowlist or DEFAULT_ALLOWED_DOMAINS
+    if not vendor_allowed(settings, "jina", "read"):
+        return vendor_blocked_response("jina_reader", "read") | {"allowlist": domains, "url": url}
     if not _url_allowed(url, domains):
         return {
             "provider": "jina_reader",
@@ -1834,7 +1845,7 @@ async def jina_read_url(
             "authenticated": bool(settings.jina_api_key),
             "allowlist": domains,
             "result": None,
-            "error": str(exc),
+            "error": sanitize_provider_error(exc),
         }
 
 
@@ -1847,6 +1858,8 @@ async def jina_rerank_documents(
 ) -> dict[str, Any]:
     if not settings.jina_api_key:
         return {"provider": "jina_reranker", "configured": False, "results": [], "error": "JINA_API_KEY is not configured."}
+    if not vendor_allowed(settings, "jina", "rerank"):
+        return vendor_blocked_response("jina_reranker", "rerank")
     normalized_documents = [_document_text(document) for document in documents[:20]]
     try:
         async with httpx.AsyncClient(timeout=30) as client:
@@ -1875,7 +1888,7 @@ async def jina_rerank_documents(
             results.append(result)
         return {"provider": "jina_reranker", "configured": True, "model": model, "results": results}
     except httpx.HTTPError as exc:
-        return {"provider": "jina_reranker", "configured": True, "model": model, "results": [], "error": str(exc)}
+        return {"provider": "jina_reranker", "configured": True, "model": model, "results": [], "error": sanitize_provider_error(exc)}
 
 
 async def openalex_search_works(
@@ -1886,6 +1899,8 @@ async def openalex_search_works(
 ) -> dict[str, Any]:
     if not settings.openalex_api_key:
         return {"provider": "openalex", "configured": False, "results": [], "error": "OPENALEX_API_KEY is not configured."}
+    if not vendor_allowed(settings, "openalex", "research_search"):
+        return vendor_blocked_response("openalex", "research_search")
     params: dict[str, Any] = {
         "api_key": settings.openalex_api_key,
         "search": query,
@@ -1906,7 +1921,7 @@ async def openalex_search_works(
             "results": [_openalex_work_summary(item) for item in data.get("results", [])],
         }
     except httpx.HTTPError as exc:
-        return {"provider": "openalex", "configured": True, "results": [], "error": str(exc)}
+        return {"provider": "openalex", "configured": True, "results": [], "error": sanitize_provider_error(exc)}
 
 
 async def semantic_scholar_search_papers(
@@ -1915,6 +1930,8 @@ async def semantic_scholar_search_papers(
     limit: int = 5,
     year: str | None = None,
 ) -> dict[str, Any]:
+    if not vendor_allowed(settings, "semantic_scholar", "research_search"):
+        return vendor_blocked_response("semantic_scholar", "research_search")
     headers = {"x-api-key": settings.semantic_scholar_api_key} if settings.semantic_scholar_api_key else {}
     params: dict[str, Any] = {
         "query": query,
@@ -1941,7 +1958,7 @@ async def semantic_scholar_search_papers(
             "configured": True,
             "authenticated": bool(settings.semantic_scholar_api_key),
             "results": [],
-            "error": str(exc),
+            "error": sanitize_provider_error(exc),
         }
 
 
@@ -1954,6 +1971,8 @@ async def sealion_regional_review(
 ) -> dict[str, Any]:
     if not settings.sealion_api_key:
         return {"provider": "sealion", "configured": False, "result": None, "error": "SEALION_API_KEY is not configured."}
+    if not vendor_allowed(settings, "sealion", "regional_review"):
+        return vendor_blocked_response("sealion", "regional_review")
     prompt = (
         "You are reviewing caregiver-app text for Singapore and Southeast Asian family caregivers. "
         "Keep medical claims conservative, preserve meaning, flag confusing phrasing, and adapt tone for the target language or locale. "
@@ -1978,7 +1997,7 @@ async def sealion_regional_review(
             "result": content,
         }
     except Exception as exc:
-        return {"provider": "sealion", "configured": True, "model": settings.sealion_model, "result": None, "error": str(exc)}
+        return {"provider": "sealion", "configured": True, "model": settings.sealion_model, "result": None, "error": sanitize_provider_error(exc)}
 
 
 async def sealion_guard_check(
@@ -1988,6 +2007,8 @@ async def sealion_guard_check(
 ) -> dict[str, Any]:
     if not settings.sealion_api_key:
         return {"provider": "sealion_guard", "configured": False, "result": None, "error": "SEALION_API_KEY is not configured."}
+    if not vendor_allowed(settings, "sealion", "guard_check"):
+        return vendor_blocked_response("sealion_guard", "guard_check")
     if response is not None:
         content = f"Human user:{prompt}\nAI assistant:{response}."
     else:
@@ -2008,7 +2029,7 @@ async def sealion_guard_check(
             "result": result,
         }
     except Exception as exc:
-        return {"provider": "sealion_guard", "configured": True, "model": settings.sealion_guard_model, "result": None, "error": str(exc)}
+        return {"provider": "sealion_guard", "configured": True, "model": settings.sealion_guard_model, "result": None, "error": sanitize_provider_error(exc)}
 
 
 async def _exa_search(query: str, api_key: str, allowlist: list[str], num_results: int = 5, search_type: str = "auto") -> list[dict[str, Any]]:

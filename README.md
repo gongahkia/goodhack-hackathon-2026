@@ -4,8 +4,8 @@ Caregiver Companion is now a backend-first, transcription-driven care workflow. 
 
 The backend:
 
-- accepts raw audio and calls OpenAI audio transcription
-- stores transcription sessions and raw transcripts locally
+- accepts raw audio and calls OpenAI audio transcription with first-class `auto`, English, Malay/Bahasa, Tamil, Mandarin, and Thai language hints
+- stores transcription sessions, original transcripts, and English-normalized text for non-English downstream extraction
 - redacts direct PII before downstream extraction, triage, research, guardrail, and synthesis work
 - rehydrates local placeholders before returning user-facing task artifacts
 - triages transcripts into daily tasks, appointment candidates, and guarded ad hoc research tasks
@@ -57,11 +57,17 @@ Minimum for real transcription:
 OPENAI_API_KEY=...
 ```
 
+Transcription language defaults to auto-detect. Supported request values are `auto`, `en`, `ms`, `ta`, `zh`, and `th`. Use `POST /transcriptions?language=ms` or `POST /transcribe?language=zh` to override detection. Non-English transcripts preserve the original text and add English-normalized text for the existing extraction pipeline.
+
 Optional:
 
 ```bash
 DATABASE_URL=...
+APP_ENV=development
+API_READ_KEY=...
 API_WRITE_KEY=...
+CLINICIAN_REVIEW_KEY=...
+DATA_ENCRYPTION_KEY=...
 GOOGLE_CALENDAR_ACCESS_TOKEN=...
 GOOGLE_CALENDAR_ID=primary
 TINYFISH_API_KEY=...
@@ -70,9 +76,13 @@ SEALION_API_KEY=...
 SEALION_TRANSCRIPT_REVIEW_ENABLED=true
 ```
 
+When any API key is configured, patient/caregiver read endpoints require either `X-API-Key` or `X-Clinician-Key`; mutating endpoints require the write key. In `APP_ENV=pilot` or `APP_ENV=production`, `API_READ_KEY`, `API_WRITE_KEY`, and `DATA_ENCRYPTION_KEY` are required at startup. `GET /health` stays public and intentionally returns only a minimal service status.
+
+When `DATA_ENCRYPTION_KEY` is set, sensitive persisted fields such as raw transcripts, normalized transcripts, placeholder maps, calendar payloads, raw NEHR content, and provider errors are encrypted at rest. Normal API responses redact raw transcript fields and placeholder maps.
+
 Without `DATABASE_URL`, the backend uses an in-memory graph store. Server reloads clear in-memory sessions.
 
-When `SEALION_TRANSCRIPT_REVIEW_ENABLED=true`, the backend sends only the redacted transcript, not the raw transcript, to SEA-LION and stores the result as a `transcript_review` graph node.
+When `SEALION_TRANSCRIPT_REVIEW_ENABLED=true`, the backend sends only redacted text and redacted artifacts to SEA-LION. It stores review/localization outputs as graph review nodes and optional localized display payloads; SEA-LION flags do not overwrite canonical transcript, extraction, or research data.
 
 ## Useful Commands
 
@@ -86,6 +96,12 @@ Run tests:
 
 ```bash
 make test
+```
+
+Run the bounded robustness loop used for frontend-readiness checks:
+
+```bash
+make robustness-loop
 ```
 
 Run the full explicit backend suite:
@@ -104,6 +120,12 @@ Learning harness notes:
 
 ```bash
 open docs/LEARNING_HARNESS.md
+```
+
+Google Calendar demo runbook:
+
+```bash
+open docs/GOOGLE_CALENDAR_DEMO.md
 ```
 
 Health check:
@@ -135,5 +157,9 @@ Core transcript-first endpoints:
 - `POST /appointments/{appointment_id}/approve-calendar-write`
 - `GET /notifications`
 - `GET /audit`
+- `POST /privacy/consents`
+- `POST /privacy/requests`
+- `POST /privacy/incidents`
+- `POST /privacy/retention/purge`
 
 Legacy NEHR/demo routes are disabled by default unless `LEGACY_DEMO_ENABLED=true`.

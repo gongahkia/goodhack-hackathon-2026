@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from .config import Settings
 from .data import singapore_support_corpus
 from .models import Node
+from .sealion_reviews import maybe_secondary_research_guardrail_with_sealion
 from .store import GraphStore
 from .v2 import exa_search_web, search_verified_grants, search_verified_resources, tinyfish_search_web
 
@@ -126,6 +127,16 @@ async def run_guarded_research_pipeline(
         await store.finish_reasoning_log(log.id, "Research blocked by guardrail.")
         return _result(plan_node, guardrail_node, [], recommendation)
 
+    secondary_guardrail_node = await maybe_secondary_research_guardrail_with_sealion(
+        store,
+        patient_id,
+        task,
+        plan_node,
+        guardrail_node,
+        settings,
+        log.id,
+    )
+
     adapter = tool_adapter or DefaultResearchToolAdapter()
     research_result_nodes = []
     all_sources: list[ResearchSource] = []
@@ -167,7 +178,7 @@ async def run_guarded_research_pipeline(
     await store.update_node_payload(task.id, {"source_status": "research_completed", "recommendation_id": str(recommendation_node.id)}, "approved")
     await store.append_reasoning_step(log.id, {"kind": "synthesis_model_output", "recommendation_id": str(recommendation_node.id), "evidence_count": len(all_sources)})
     await store.finish_reasoning_log(log.id, "Guarded research completed.")
-    return _result(plan_node, guardrail_node, research_result_nodes, recommendation_node)
+    return _result(plan_node, guardrail_node, research_result_nodes, recommendation_node, secondary_guardrail_node)
 
 
 def plan_research(task: Node, settings: Settings) -> ResearchPlan:
@@ -451,10 +462,17 @@ def _claim_from_source(source: ResearchSource) -> str:
     return f"Verified source: {label}."
 
 
-def _result(plan_node: Node, guardrail_node: Node, research_result_nodes: list[Node], recommendation_node: Node) -> dict[str, Any]:
+def _result(
+    plan_node: Node,
+    guardrail_node: Node,
+    research_result_nodes: list[Node],
+    recommendation_node: Node,
+    secondary_guardrail_node: Node | None = None,
+) -> dict[str, Any]:
     return {
         "research_plan": plan_node.model_dump(mode="json"),
         "guardrail_review": guardrail_node.model_dump(mode="json"),
+        "secondary_guardrail_review": secondary_guardrail_node.model_dump(mode="json") if secondary_guardrail_node else None,
         "research_results": [node.model_dump(mode="json") for node in research_result_nodes],
         "synthesized_recommendation": recommendation_node.model_dump(mode="json"),
     }

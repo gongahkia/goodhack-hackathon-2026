@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 import asyncpg
 
 from .models import Edge, GraphSubset, NehrRecordRaw, Node, ReasoningLog
+from .storage_security import FieldCrypto
 
 
 def utcnow() -> datetime:
@@ -106,12 +107,13 @@ class GraphStore(ABC):
 
 
 class MemoryGraphStore(GraphStore):
-    def __init__(self) -> None:
+    def __init__(self, encryption_key: str | None = None) -> None:
         self.nodes: dict[UUID, Node] = {}
         self.edges: dict[UUID, Edge] = {}
         self.logs: dict[UUID, ReasoningLog] = {}
         self.raw: dict[UUID, NehrRecordRaw] = {}
         self.system_state: dict[str, dict[str, Any]] = {}
+        self.crypto = FieldCrypto(encryption_key)
 
     async def init(self) -> None:
         return None
@@ -149,16 +151,17 @@ class MemoryGraphStore(GraphStore):
             id=uuid4(),
             patient_id=patient_id,
             record_type=record_type,
-            content=content,
+            content=self.crypto.encrypt_payload({"content": content})["content"],
             recorded_at=recorded_at,
             ingested_at=utcnow(),
         )
         self.raw[row.id] = row
-        return row
+        return row.model_copy(update={"content": self.crypto.decrypt_payload({"content": row.content})["content"]})
 
     async def list_nehr_raw(self, patient_id: str, since: datetime | None = None) -> list[NehrRecordRaw]:
         rows = [row for row in self.raw.values() if row.patient_id == patient_id and (since is None or row.recorded_at >= since)]
-        return sorted(rows, key=lambda item: item.recorded_at, reverse=True)
+        decrypted = [row.model_copy(update={"content": self.crypto.decrypt_payload({"content": row.content})["content"]}) for row in rows]
+        return sorted(decrypted, key=lambda item: item.recorded_at, reverse=True)
 
     async def create_node(
         self,
@@ -172,14 +175,14 @@ class MemoryGraphStore(GraphStore):
         node = Node(
             id=id or uuid4(),
             type=type,
-            payload=payload,
+            payload=self.crypto.encrypt_payload(payload),
             created_by=created_by,
             created_at=utcnow(),
             reasoning_log_id=reasoning_log_id,
             status=status,
         )
         self.nodes[node.id] = node
-        return node
+        return node.model_copy(update={"payload": self.crypto.decrypt_payload(node.payload)})
 
     async def create_edge(self, from_node: UUID, to_node: UUID, edge_type: str) -> Edge:
         edge = Edge(id=uuid4(), from_node=from_node, to_node=to_node, type=edge_type, created_at=utcnow())
@@ -202,7 +205,7 @@ class MemoryGraphStore(GraphStore):
         return node, edge
 
     async def list_nodes(self, patient_id: str | None = None, node_types: list[str] | None = None) -> list[Node]:
-        rows = list(self.nodes.values())
+        rows = [node.model_copy(update={"payload": self.crypto.decrypt_payload(node.payload)}) for node in self.nodes.values()]
         if patient_id:
             rows = [node for node in rows if node.payload.get("patient_id") == patient_id]
         if node_types:
@@ -213,7 +216,8 @@ class MemoryGraphStore(GraphStore):
         return list(self.edges.values())
 
     async def get_node(self, node_id: UUID) -> Node | None:
-        return self.nodes.get(node_id)
+        node = self.nodes.get(node_id)
+        return node.model_copy(update={"payload": self.crypto.decrypt_payload(node.payload)}) if node else None
 
     async def update_node_status(self, node_id: UUID, status: str) -> Node | None:
         node = self.nodes.get(node_id)
@@ -221,15 +225,16 @@ class MemoryGraphStore(GraphStore):
             return None
         updated = node.model_copy(update={"status": status})
         self.nodes[node_id] = updated
-        return updated
+        return updated.model_copy(update={"payload": self.crypto.decrypt_payload(updated.payload)})
 
     async def update_node_payload(self, node_id: UUID, payload: dict[str, Any], status: str) -> Node | None:
         node = self.nodes.get(node_id)
         if not node:
             return None
-        updated = node.model_copy(update={"payload": {**node.payload, **payload}, "status": status})
+        decrypted_payload = self.crypto.decrypt_payload(node.payload)
+        updated = node.model_copy(update={"payload": self.crypto.encrypt_payload({**decrypted_payload, **payload}), "status": status})
         self.nodes[node_id] = updated
-        return updated
+        return updated.model_copy(update={"payload": self.crypto.decrypt_payload(updated.payload)})
 
     async def get_system_state(self, key: str) -> dict[str, Any] | None:
         item = self.system_state.get(key)
@@ -259,10 +264,11 @@ class MemoryGraphStore(GraphStore):
 
 
 class PostgresGraphStore(GraphStore):
-    def __init__(self, database_url: str, schema_path: Path) -> None:
+    def __init__(self, database_url: str, schema_path: Path, encryption_key: str | None = None) -> None:
         self.database_url = database_url
         self.schema_path = schema_path
         self.pool: asyncpg.Pool | None = None
+        self.crypto = FieldCrypto(encryption_key)
 
     async def init(self) -> None:
         self.pool = await asyncpg.create_pool(self.database_url, min_size=1, max_size=5)
@@ -332,10 +338,11 @@ class PostgresGraphStore(GraphStore):
                 uuid4(),
                 patient_id,
                 record_type,
-                json.dumps(content),
+                json.dumps(self.crypto.encrypt_payload({"content": content})["content"]),
                 recorded_at,
             )
-        return _raw(row)
+        raw = _raw(row)
+        return raw.model_copy(update={"content": self.crypto.decrypt_payload({"content": raw.content})["content"]})
 
     async def list_nehr_raw(self, patient_id: str, since: datetime | None = None) -> list[NehrRecordRaw]:
         query = "select * from nehr_records_raw where patient_id = $1"
@@ -346,7 +353,10 @@ class PostgresGraphStore(GraphStore):
         query += " order by recorded_at desc"
         async with self._conn().acquire() as conn:
             rows = await conn.fetch(query, *args)
-        return [_raw(row) for row in rows]
+        return [
+            raw.model_copy(update={"content": self.crypto.decrypt_payload({"content": raw.content})["content"]})
+            for raw in (_raw(row) for row in rows)
+        ]
 
     async def create_node(
         self,
@@ -366,12 +376,13 @@ class PostgresGraphStore(GraphStore):
                 """,
                 id or uuid4(),
                 type,
-                json.dumps(payload),
+                json.dumps(self.crypto.encrypt_payload(payload)),
                 created_by,
                 reasoning_log_id,
                 status,
             )
-        return _node(row)
+        node = _node(row)
+        return node.model_copy(update={"payload": self.crypto.decrypt_payload(node.payload)})
 
     async def create_edge(self, from_node: UUID, to_node: UUID, edge_type: str) -> Edge:
         async with self._conn().acquire() as conn:
@@ -416,7 +427,8 @@ class PostgresGraphStore(GraphStore):
                 to_node,
                 edge_type,
             )
-        return _node(node_row), _edge(edge_row)
+        node = _node(node_row)
+        return node.model_copy(update={"payload": self.crypto.decrypt_payload(node.payload)}), _edge(edge_row)
 
     async def list_nodes(self, patient_id: str | None = None, node_types: list[str] | None = None) -> list[Node]:
         conditions: list[str] = []
@@ -430,7 +442,7 @@ class PostgresGraphStore(GraphStore):
         where = f"where {' and '.join(conditions)}" if conditions else ""
         async with self._conn().acquire() as conn:
             rows = await conn.fetch(f"select * from nodes {where} order by created_at desc", *args)
-        return [_node(row) for row in rows]
+        return [node.model_copy(update={"payload": self.crypto.decrypt_payload(node.payload)}) for node in (_node(row) for row in rows)]
 
     async def list_edges(self) -> list[Edge]:
         async with self._conn().acquire() as conn:
@@ -440,12 +452,14 @@ class PostgresGraphStore(GraphStore):
     async def get_node(self, node_id: UUID) -> Node | None:
         async with self._conn().acquire() as conn:
             row = await conn.fetchrow("select * from nodes where id = $1", node_id)
-        return _node(row) if row else None
+        node = _node(row) if row else None
+        return node.model_copy(update={"payload": self.crypto.decrypt_payload(node.payload)}) if node else None
 
     async def update_node_status(self, node_id: UUID, status: str) -> Node | None:
         async with self._conn().acquire() as conn:
             row = await conn.fetchrow("update nodes set status = $2 where id = $1 returning *", node_id, status)
-        return _node(row) if row else None
+        node = _node(row) if row else None
+        return node.model_copy(update={"payload": self.crypto.decrypt_payload(node.payload)}) if node else None
 
     async def update_node_payload(self, node_id: UUID, payload: dict[str, Any], status: str) -> Node | None:
         async with self._conn().acquire() as conn:
@@ -457,10 +471,11 @@ class PostgresGraphStore(GraphStore):
                 returning *
                 """,
                 node_id,
-                json.dumps(payload),
+                json.dumps(self.crypto.encrypt_payload(payload)),
                 status,
             )
-        return _node(row) if row else None
+        node = _node(row) if row else None
+        return node.model_copy(update={"payload": self.crypto.decrypt_payload(node.payload)}) if node else None
 
     async def get_system_state(self, key: str) -> dict[str, Any] | None:
         async with self._conn().acquire() as conn:

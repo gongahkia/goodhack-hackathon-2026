@@ -39,6 +39,12 @@ NodeType = Literal[
     "user_decision",
     "model_evaluation",
     "prompt_candidate",
+    "consent_record",
+    "processing_activity",
+    "data_subject_request",
+    "privacy_incident",
+    "retention_tombstone",
+    "patient_identity",
 ]
 
 EdgeType = Literal[
@@ -67,6 +73,9 @@ EdgeType = Literal[
     "approved_by_user",
     "written_to_calendar",
     "candidate_from",
+    "documents_consent",
+    "documents_processing",
+    "retention_applied",
 ]
 CreatedBy = Literal["agent", "system", "user"]
 NodeStatus = Literal["pending_review", "approved", "dismissed", "edited", "clarification_required"]
@@ -120,6 +129,14 @@ class PatientSummary(BaseModel):
     caregiver: str
     living_arrangement: str
     key_conditions: list[str]
+
+
+class IdentityAliasCreate(BaseModel):
+    alias: str = Field(min_length=1, max_length=120)
+    entity: Literal["patient", "caregiver", "clinician", "unknown"] = "patient"
+    source: str = Field(default="user", min_length=1, max_length=80)
+    confidence: float = Field(default=0.95, ge=0, le=1)
+    status: NodeStatus = "approved"
 
 
 class StatusUpdate(BaseModel):

@@ -2,6 +2,8 @@
 
 This repository is now backend-first. The active product flow starts with audio transcription, stores the transcript locally, redacts direct PII before downstream processing, triages the result into daily tasks and ad hoc artifacts, and keeps graph nodes/edges for auditability.
 
+Transcription language defaults to auto-detect. First-class request values are `auto`, `en`, `ms`, `ta`, `zh`, and `th`. Non-English transcripts preserve the original text and store English-normalized text for downstream extraction.
+
 ## Start The Backend
 
 From the repository root:
@@ -26,17 +28,25 @@ For real transcription:
 OPENAI_API_KEY=...
 ```
 
-Optional write protection:
+Optional API protection and privacy controls:
 
 ```bash
+APP_ENV=development
+API_READ_KEY=...
 API_WRITE_KEY=...
+CLINICIAN_REVIEW_KEY=...
+DATA_ENCRYPTION_KEY=...
+RAW_TRANSCRIPT_RETENTION_DAYS=30
+PLACEHOLDER_MAP_RETENTION_DAYS=30
 ```
 
-When `API_WRITE_KEY` is set, mutating endpoints require:
+When any API key is set, patient/caregiver read endpoints require an accepted `X-API-Key` or `X-Clinician-Key`, and mutating endpoints require the write key. In `APP_ENV=pilot` or `APP_ENV=production`, the backend requires `API_READ_KEY`, `API_WRITE_KEY`, and `DATA_ENCRYPTION_KEY` at startup.
 
 ```bash
 X-API-Key: ...
 ```
+
+Normal API responses redact raw transcripts, normalized transcript text, placeholder maps, calendar event payloads, and provider error details. When `DATA_ENCRYPTION_KEY` is configured, those sensitive fields are also encrypted at rest.
 
 For Google Calendar writes:
 
@@ -56,7 +66,7 @@ SEALION_MODEL=aisingapore/Gemma-SEA-LION-v4-27B-IT
 SEALION_TRANSCRIPT_REVIEW_ENABLED=true
 ```
 
-When enabled, SEA-LION receives the redacted transcript only. The backend stores its output as a `transcript_review` node linked to the `pii_redaction` node with `reviewed_from`.
+When enabled, SEA-LION receives only redacted transcript text and redacted artifact summaries. The backend stores transcript QA, extraction sanity, and localization outputs as `transcript_review` nodes linked with `reviewed_from`. SEA-Guard may also create a flag-only secondary `guardrail_review` during research; it does not override the deterministic local guardrail.
 
 ## Smoke Checks
 
@@ -64,6 +74,12 @@ Health check:
 
 ```bash
 curl -s http://127.0.0.1:8000/health | jq
+```
+
+Expected:
+
+```json
+{"ok": true, "service": "Caregiver Companion API"}
 ```
 
 Legacy NEHR/demo runtime paths should be disabled by default:
@@ -95,6 +111,14 @@ curl -s -X POST http://127.0.0.1:8000/transcriptions \
   --data-binary @/tmp/care.wav | jq
 ```
 
+To force a supported Singapore language instead of auto-detection:
+
+```bash
+curl -s -X POST "http://127.0.0.1:8000/transcriptions?language=ms" \
+  -H "Content-Type: audio/wav" \
+  --data-binary @/tmp/care.wav | jq
+```
+
 If `API_WRITE_KEY` is set, add:
 
 ```bash
@@ -110,7 +134,8 @@ curl -s -X POST http://127.0.0.1:8000/transcriptions/SESSION_ID/process | jq
 Expected behavior:
 
 - `pii_redaction` is created internally before extraction.
-- if enabled, SEA-LION transcript review runs on the redacted transcript and creates a `transcript_review` graph node.
+- for Malay/Bahasa, Tamil, or Mandarin, stored transcript nodes keep original and English-normalized text internally, but normal API responses redact both fields.
+- if enabled, SEA-LION transcript QA, extraction sanity checks, non-English localization, and flag-only SEA-Guard research review run on redacted inputs and create graph review nodes.
 - `daily_tasks[0].payload.description` is rehydrated for the user, for example `John needs Panadol before lunch every day`.
 - `daily_tasks[0].payload.original_instruction_redacted` keeps the redacted form, for example `PERSON_1 needs Panadol before lunch every day`.
 - simple medication instructions create a daily task and do not create speculative research.
@@ -183,6 +208,38 @@ Notifications include:
 - research result readiness
 - dismiss/edit feedback visibility
 
+## Privacy Controls
+
+Record explicit consent/purpose evidence:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/privacy/consents \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_WRITE_KEY" \
+  -d '{"purpose":"audio_transcription","notice_version":"pilot.v1"}' | jq
+```
+
+Create a data subject request:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/privacy/requests \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_WRITE_KEY" \
+  -d '{"request_type":"access","requester":"caregiver"}' | jq
+```
+
+Clinician-only incident and retention controls:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/privacy/incidents \
+  -H "Content-Type: application/json" \
+  -H "X-Clinician-Key: $CLINICIAN_REVIEW_KEY" \
+  -d '{"summary":"Possible transcript exposure","affected_data_categories":["transcript"]}' | jq
+
+curl -s -X POST http://127.0.0.1:8000/privacy/retention/purge \
+  -H "X-Clinician-Key: $CLINICIAN_REVIEW_KEY" | jq
+```
+
 ## Automated Verification
 
 Run the complete backend suite:
@@ -205,3 +262,4 @@ The API contract tests cover:
 - notification visibility for transcript-first graph nodes
 - research evidence merging, where local corpus evidence is kept alongside mocked live web-search evidence
 - learning context, model evaluation records, and prompt candidates that require human review
+- read protection, response redaction, encrypted sensitive fields, consent/DSAR/incident records, and retention purge behavior

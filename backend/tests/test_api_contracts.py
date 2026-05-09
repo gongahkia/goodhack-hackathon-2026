@@ -49,18 +49,22 @@ def _create_transcription(client: TestClient) -> dict:
     return response.json()
 
 
-def test_write_endpoints_require_api_key_but_read_endpoints_remain_public(monkeypatch):
+def test_patient_read_and_write_endpoints_require_api_key_but_health_is_public(monkeypatch):
     _install_test_app(monkeypatch)
 
     with TestClient(main.app) as client:
         health = client.get("/health")
+        blocked_read = client.get("/tasks/daily")
         blocked = client.post("/scheduler/next-day-check")
+        allowed_read = client.get("/tasks/daily", headers=_headers())
         allowed = client.post("/scheduler/next-day-check", headers=_headers())
 
     assert health.status_code == 200
-    assert health.json()["ok"] is True
+    assert health.json() == {"ok": True, "service": "Caregiver Companion API"}
+    assert blocked_read.status_code == 401
     assert blocked.status_code == 401
     assert blocked.json()["detail"] == "A valid X-API-Key is required for this operation."
+    assert allowed_read.status_code == 200
     assert allowed.status_code == 200
     assert allowed.json()["target_date"]
 
@@ -89,7 +93,7 @@ def test_transcript_first_api_flow_is_idempotent_and_preserves_user_facing_pii(m
         first = client.post(f"/transcriptions/{session_id}/process", headers=_headers())
         second = client.post(f"/transcriptions/{session_id}/process", headers=_headers())
         direct = client.post(f"/transcripts/{transcript_id}/process", headers=_headers())
-        tasks = client.get("/tasks/daily")
+        tasks = client.get("/tasks/daily", headers=_headers())
 
     assert first.status_code == 200
     assert second.status_code == 200
@@ -226,13 +230,13 @@ def test_notifications_surface_daily_tasks_calendar_failures_and_dismissal_feedb
     task, request = asyncio.run(seed_nodes())
 
     with TestClient(main.app) as client:
-        before = client.get("/notifications")
+        before = client.get("/notifications", headers=_headers())
         dismiss = client.patch(
             f"/nodes/{task.id}/status",
             headers=_headers(),
             json={"status": "dismissed", "feedback_note": "Not needed today."},
         )
-        after = client.get("/notifications")
+        after = client.get("/notifications", headers=_headers())
 
     assert before.status_code == 200
     kinds = {item["kind"] for item in before.json()}
@@ -272,7 +276,7 @@ def test_long_transcript_route_creates_daily_appointment_and_research_without_du
     with TestClient(main.app) as client:
         first = client.post(f"/transcripts/{transcript.id}/process", headers=_headers())
         second = client.post(f"/transcripts/{transcript.id}/process", headers=_headers())
-        research_tasks = client.get("/research/tasks")
+        research_tasks = client.get("/research/tasks", headers=_headers())
 
     assert first.status_code == 200
     assert second.status_code == 200
@@ -362,3 +366,63 @@ def test_transcription_route_rejects_empty_audio_before_provider_call(monkeypatc
     assert response.status_code == 400
     assert response.json()["detail"] == "No audio was received."
     assert called is False
+
+
+def test_transcription_routes_accept_language_override_and_reject_unsupported_language(monkeypatch):
+    store = _install_test_app(monkeypatch)
+    captured = {}
+
+    async def fake_transcribe_audio(audio, content_type, settings):
+        captured.setdefault("languages", []).append(settings.transcription_language)
+        return TranscriptionResult(
+            text="சாப்பாட்டுக்கு முன் Panadol கொடுக்கவும்.",
+            provider="openai",
+            model="gpt-4o-transcribe",
+            language="ta",
+            requested_language="ta",
+            detected_language="ta",
+            language_label="Tamil",
+        )
+
+    async def fake_normalize(text, source_language, settings):
+        from app.transcription import TranscriptNormalization
+
+        return TranscriptNormalization(
+            normalized_english_text="Give Panadol before food.",
+            provider="openai",
+            model=settings.openai_model,
+            status="completed",
+            source_language=source_language,
+        )
+
+    monkeypatch.setattr(main, "transcribe_audio", fake_transcribe_audio)
+    monkeypatch.setattr(transcript_pipeline, "transcribe_audio", fake_transcribe_audio)
+    monkeypatch.setattr(transcript_pipeline, "normalize_transcript_to_english", fake_normalize)
+
+    with TestClient(main.app) as client:
+        direct = client.post(
+            "/transcribe?language=ta",
+            content=b"fake wav bytes",
+            headers={**_headers(), "Content-Type": "audio/wav"},
+        )
+        created = client.post(
+            "/transcriptions?language=ta",
+            content=b"fake wav bytes",
+            headers={**_headers(), "Content-Type": "audio/wav"},
+        )
+        invalid = client.post(
+            "/transcriptions?language=fr",
+            content=b"fake wav bytes",
+            headers={**_headers(), "Content-Type": "audio/wav"},
+        )
+
+    assert direct.status_code == 200
+    assert direct.json()["requested_language"] == "ta"
+    assert direct.json()["language_label"] == "Tamil"
+    assert created.status_code == 200
+    assert created.json()["transcript"]["payload"]["requested_language"] == "ta"
+    assert created.json()["transcript"]["payload"]["normalized_english_text"] == "[redacted]"
+    stored_transcripts = asyncio.run(store.list_nodes("mdm-tan", ["transcript"]))
+    assert stored_transcripts[0].payload["normalized_english_text"] == "Give Panadol before food."
+    assert invalid.status_code == 422
+    assert captured["languages"] == ["ta", "ta"]

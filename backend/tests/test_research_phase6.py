@@ -125,6 +125,45 @@ async def test_recommendation_notification_is_polling_visible_after_research_com
     assert any(item["kind"] == "research result ready" for item in notifications)
 
 
+@pytest.mark.asyncio
+async def test_sealion_secondary_research_guardrail_is_flag_only_and_does_not_block_search(monkeypatch):
+    captured = {}
+
+    async def fake_guard(settings, *, prompt, response=None, max_tokens=300):
+        captured["prompt"] = prompt
+        return {
+            "provider": "sealion_guard",
+            "configured": True,
+            "model": settings.sealion_guard_model,
+            "result": {
+                "risk_level": "medium",
+                "concerns": ["Avoid unsupported eligibility promises."],
+                "medical_advice_risk": False,
+                "unsupported_eligibility_risk": True,
+                "notes": "Flag only.",
+            },
+        }
+
+    monkeypatch.setattr("app.sealion_reviews.sealion_guard_json_review", fake_guard)
+    store = MemoryGraphStore()
+    task = await _research_task_from_transcript(store)
+    adapter = FakeResearchAdapter()
+
+    result = await run_guarded_research_pipeline(
+        store,
+        task,
+        Settings(sealion_api_key="test-sealion"),
+        adapter,
+    )
+
+    assert "John" not in captured["prompt"]
+    assert result["guardrail_review"]["payload"]["decision"] == "approved"
+    assert result["secondary_guardrail_review"]["payload"]["kind"] == "sealion_secondary_research_guardrail"
+    assert result["secondary_guardrail_review"]["payload"]["decision"] == "flag_only"
+    assert len(result["research_results"]) >= 2
+    assert adapter.queries
+
+
 def test_research_task_endpoint_runs_guarded_pipeline(monkeypatch):
     store = MemoryGraphStore()
 

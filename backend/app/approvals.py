@@ -9,6 +9,7 @@ import httpx
 from .config import Settings
 from .models import Node
 from .scheduler import SINGAPORE_TZ
+from .security import sanitize_provider_error, vendor_allowed
 from .store import GraphStore
 
 
@@ -25,6 +26,8 @@ class GoogleCalendarWriteProvider:
     settings: Settings
 
     async def insert_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not vendor_allowed(self.settings, "google_calendar", "calendar_write"):
+            raise RuntimeError("Google Calendar is disabled for calendar_write.")
         if not self.settings.google_calendar_access_token:
             raise RuntimeError("Google Calendar write requires GOOGLE_CALENDAR_ACCESS_TOKEN.")
         url = f"{self.settings.google_calendar_api_base_url.rstrip('/')}/calendars/{self.settings.google_calendar_id}/events"
@@ -131,7 +134,7 @@ async def approve_appointment_calendar_write(
     except Exception as exc:
         updated_request = await store.update_node_payload(
             request.id,
-            {"status": "write_failed", "error": str(exc), "event_payload": event_payload},
+            {"status": "write_failed", "error": sanitize_provider_error(exc), "event_payload": event_payload},
             "clarification_required",
         )
         return {

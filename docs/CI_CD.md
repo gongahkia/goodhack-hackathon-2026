@@ -76,12 +76,38 @@ LIVE_OPENAI_AUDIO_PATH=/absolute/path/to/speech.wav \
 backend/.venv/bin/python -m pytest backend/tests/test_live_integrations.py -m integration
 ```
 
+Run the opt-in multilingual OpenAI quality checks with one audio file and expected transcript per language:
+
+```bash
+RUN_LIVE_OPENAI_MULTILINGUAL_TESTS=1 \
+OPENAI_API_KEY=... \
+LIVE_OPENAI_AUDIO_EN_PATH=/absolute/path/to/en.wav \
+LIVE_OPENAI_TRANSCRIPT_EN="John needs Panadol before lunch." \
+LIVE_OPENAI_AUDIO_MS_PATH=/absolute/path/to/ms.wav \
+LIVE_OPENAI_TRANSCRIPT_MS="John perlu makan Panadol sebelum makan tengah hari." \
+LIVE_OPENAI_AUDIO_TA_PATH=/absolute/path/to/ta.wav \
+LIVE_OPENAI_TRANSCRIPT_TA="..." \
+LIVE_OPENAI_AUDIO_ZH_PATH=/absolute/path/to/zh.wav \
+LIVE_OPENAI_TRANSCRIPT_ZH="..." \
+LIVE_OPENAI_AUDIO_TH_PATH=/absolute/path/to/th.wav \
+LIVE_OPENAI_TRANSCRIPT_TH="..." \
+backend/.venv/bin/python -m pytest backend/tests/test_live_integrations.py::test_live_openai_multilingual_transcription_quality -m integration
+```
+
 Run only the live TinyFish search smoke test with:
 
 ```bash
 RUN_LIVE_TINYFISH_TESTS=1 \
 TINYFISH_API_KEY=... \
 backend/.venv/bin/python -m pytest backend/tests/test_live_integrations.py -m integration
+```
+
+Run the opt-in live SEA-LION review and SEA-Guard smoke tests with:
+
+```bash
+RUN_LIVE_SEALION_TESTS=1 \
+SEALION_API_KEY=... \
+backend/.venv/bin/python -m pytest backend/tests/test_live_integrations.py::test_live_sealion_regional_json_review_smoke backend/tests/test_live_integrations.py::test_live_sealion_guard_json_review_smoke -m integration
 ```
 
 Run the Postgres schema/store roundtrip with a disposable test database:

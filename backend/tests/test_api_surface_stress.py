@@ -172,6 +172,8 @@ def test_openapi_route_surface_matches_expected_backend_contract(monkeypatch):
         ("POST", "/demo/reset"),
         ("POST", "/demo/ingest"),
         ("GET", "/patient/summary"),
+        ("GET", "/patient/identity"),
+        ("POST", "/patient/identity/aliases"),
         ("GET", "/records"),
         ("GET", "/records/{record_id}"),
         ("GET", "/events"),
@@ -212,6 +214,13 @@ def test_openapi_route_surface_matches_expected_backend_contract(monkeypatch):
         ("POST", "/learning/prompt-candidates"),
         ("GET", "/eval/human"),
         ("POST", "/eval/human"),
+        ("POST", "/privacy/consents"),
+        ("GET", "/privacy/consents"),
+        ("POST", "/privacy/requests"),
+        ("GET", "/privacy/requests"),
+        ("POST", "/privacy/incidents"),
+        ("GET", "/privacy/incidents"),
+        ("POST", "/privacy/retention/purge"),
     }
     actual = {
         (method, route.path)
@@ -229,6 +238,7 @@ def test_write_and_clinician_routes_enforce_configured_auth(monkeypatch):
         ("post", "/demo/reset", {}),
         ("post", "/demo/ingest", {}),
         ("post", "/care-plan/rereason", {}),
+        ("post", "/patient/identity/aliases", {"json": {"alias": "Ah Ma"}}),
         ("post", "/caregiver-notes", {"json": {"text": "Ask doctor about falls at the next appointment."}}),
         ("patch", f"/care-intents/{ids['intent']}/clarification", {"json": {"answer": "Use the June appointment."}}),
         ("post", "/transcribe", {"content": b"fake", "headers": {"Content-Type": "audio/wav"}}),
@@ -310,6 +320,8 @@ def test_every_api_surface_smoke_handles_representative_inputs_without_500(monke
         ("post", "/demo/reset", {"headers": _headers(), "expected": {410}}),
         ("post", "/demo/ingest", {"headers": _headers(), "expected": {410}}),
         ("get", "/patient/summary", {}),
+        ("get", "/patient/identity", {}),
+        ("post", "/patient/identity/aliases", {"headers": _headers(), "json": {"alias": "Ah Ma", "source": "surface_smoke", "confidence": 0.9}}),
         ("get", "/records", {"expected": {410}}),
         ("get", f"/records/{ids['source']}", {"expected": {410}}),
         ("get", "/events", {}),
@@ -342,6 +354,13 @@ def test_every_api_surface_smoke_handles_representative_inputs_without_500(monke
         ("get", "/audit", {}),
         ("get", f"/audit/{ids['log']}", {}),
         ("post", "/dev/redact", {"headers": _headers(), "json": {"patient": "John Tan", "note": "Lives near Toa Payoh."}}),
+        ("post", "/privacy/consents", {"headers": _headers(), "json": {"purpose": "pilot testing", "notice_version": "pilot.v1", "channel": "api", "granted": True}}),
+        ("get", "/privacy/consents", {}),
+        ("post", "/privacy/requests", {"headers": _headers(), "json": {"request_type": "access", "requester": "caregiver", "details": "Surface smoke."}}),
+        ("get", "/privacy/requests", {}),
+        ("post", "/privacy/incidents", {"headers": _clinician_headers(), "json": {"summary": "Surface smoke incident.", "affected_data_categories": ["transcript"], "affected_user_count": 0}}),
+        ("get", "/privacy/incidents", {"headers": _clinician_headers()}),
+        ("post", "/privacy/retention/purge", {"headers": _clinician_headers()}),
         ("get", "/eval/care-plan", {}),
         ("get", "/learning/context", {"headers": _clinician_headers()}),
         ("get", "/learning/model-evaluations", {"headers": _clinician_headers()}),
@@ -355,6 +374,8 @@ def test_every_api_surface_smoke_handles_representative_inputs_without_500(monke
     with TestClient(main.app) as client:
         for method, path, kwargs in requests:
             expected = kwargs.pop("expected", {200})
+            if method == "get" and path != "/health" and "headers" not in kwargs:
+                kwargs["headers"] = _headers()
             response = getattr(client, method)(path, **kwargs)
             assert response.status_code in expected, (method, path, response.status_code, response.text)
             assert response.status_code < 500, (method, path, response.text)
@@ -397,8 +418,8 @@ def test_api_idempotency_and_write_stress_keeps_graph_bounded(monkeypatch):
             )
             for index in range(20)
         ]
-        notifications = client.get("/notifications")
-        memory = client.get("/memory")
+        notifications = client.get("/notifications", headers=_headers())
+        memory = client.get("/memory", headers=_headers())
 
     assert all(response.status_code == 200 for response in processed)
     assert len({response.text for response in processed}) == 1

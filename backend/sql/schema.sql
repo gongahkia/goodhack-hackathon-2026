@@ -39,7 +39,13 @@ create table if not exists nodes (
     'calendar_write_request',
     'user_decision',
     'model_evaluation',
-    'prompt_candidate'
+    'prompt_candidate',
+    'consent_record',
+    'processing_activity',
+    'data_subject_request',
+    'privacy_incident',
+    'retention_tombstone',
+    'patient_identity'
   )),
   payload jsonb not null,
   created_by text not null check (created_by in ('agent', 'system', 'user')),
@@ -77,7 +83,10 @@ create table if not exists edges (
     'requires_approval',
     'approved_by_user',
     'written_to_calendar',
-    'candidate_from'
+    'candidate_from',
+    'documents_consent',
+    'documents_processing',
+    'retention_applied'
   )),
   created_at timestamptz default now()
 );
@@ -114,7 +123,13 @@ alter table nodes add constraint nodes_type_check check (type in (
   'calendar_write_request',
   'user_decision',
   'model_evaluation',
-  'prompt_candidate'
+  'prompt_candidate',
+  'consent_record',
+  'processing_activity',
+  'data_subject_request',
+  'privacy_incident',
+  'retention_tombstone',
+  'patient_identity'
 ));
 
 alter table nodes drop constraint if exists nodes_status_check;
@@ -146,7 +161,10 @@ alter table edges add constraint edges_type_check check (type in (
   'requires_approval',
   'approved_by_user',
   'written_to_calendar',
-  'candidate_from'
+  'candidate_from',
+  'documents_consent',
+  'documents_processing',
+  'retention_applied'
 ));
 
 create table if not exists nehr_records_raw (

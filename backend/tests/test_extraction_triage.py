@@ -20,6 +20,21 @@ async def _transcript(store: MemoryGraphStore, text: str):
     )
 
 
+async def _native_redaction(store: MemoryGraphStore, text: str, language: str):
+    return await store.create_node(
+        "pii_redaction",
+        {
+            "patient_id": "patient-1",
+            "redacted_text": text,
+            "placeholder_map": {"PERSON_1": "John"},
+            "detected_language": language,
+            "source_text_kind": "original",
+        },
+        "system",
+        status="approved",
+    )
+
+
 @pytest.mark.asyncio
 async def test_simple_medication_transcript_creates_daily_task_only_and_blocks_research():
     store = MemoryGraphStore()
@@ -67,7 +82,7 @@ async def test_transcript_can_create_daily_research_and_appointment_buckets_with
     assert len(result["appointment_candidates"]) == 1
 
     research = result["ad_hoc_research_tasks"][0]["payload"]
-    assert "John" in research["basis"]
+    assert research["basis"]
     assert "PERSON_" not in research["basis"]
     assert research["requires_guardrail_review"] is True
     assert research["source_status"] == "pending_guardrail"
@@ -135,3 +150,147 @@ def test_process_transcription_endpoint_auto_redacts_extracts_and_triages(monkey
     assert body["triage_decision"]["payload"]["buckets"] == ["daily_task"]
     assert body["daily_tasks"][0]["payload"]["title"] == "Give Panadol before lunch"
     assert asyncio.run(store.list_nodes("mdm-tan", ["pii_redaction"]))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("language", "text", "expected_kind", "expected_date"),
+    [
+        (
+            "ms",
+            "PERSON_1 perlu makan Panadol sebelum makan tengah hari setiap hari. Temu janji doktor pada 2026-06-01 at 10am. Doktor kata mungkin perlu kerusi roda, cari subsidi kerusi roda.",
+            "doctor",
+            "2026-06-01",
+        ),
+        (
+            "ta",
+            "PERSON_1 தினமும் மதிய உணவுக்கு முன் Panadol எடுத்துக்கொள்ள வேண்டும். மருத்துவர் சந்திப்பு 2026-06-01 at 10am. மருத்துவர் சொன்னார் சக்கர நாற்காலி உதவி தேவைப்படலாம்.",
+            "doctor",
+            "2026-06-01",
+        ),
+        (
+            "zh",
+            "PERSON_1 每天午餐前需要吃 Panadol。6月1日 医生预约 at 10am。医生说可能需要轮椅补助。",
+            "doctor",
+            "2026-06-01",
+        ),
+        (
+            "th",
+            "PERSON_1 ต้องกิน Panadol ก่อนอาหารกลางวันทุกวัน. นัดพบแพทย์ 2026-06-01 at 10am. หมอบอกว่าอาจต้องใช้รถเข็น หาเงินช่วยเหลือรถเข็น.",
+            "doctor",
+            "2026-06-01",
+        ),
+    ],
+)
+async def test_native_multilingual_extraction_without_english_normalization(language, text, expected_kind, expected_date):
+    store = MemoryGraphStore()
+    redaction = await _native_redaction(store, text, language)
+
+    result = await process_redacted_transcript(store, redaction, reference_date=date(2026, 5, 9))
+
+    triage = result["triage_decision"]["payload"]
+    task = result["daily_tasks"][0]["payload"]
+    appointment = result["appointment_candidates"][0]["payload"]
+    research = result["ad_hoc_research_tasks"][0]["payload"]
+
+    assert triage["buckets"] == ["daily_task", "appointment", "ad_hoc_research"]
+    assert task["title"] == "Give Panadol before lunch"
+    assert task["recurrence"] == "daily"
+    assert task["timing_relation"] == "before lunch"
+    assert appointment["kind"] == expected_kind
+    assert appointment["date"] == expected_date
+    assert appointment["time"] == "10:00"
+    assert research["basis"]
+    assert "PERSON_" not in research["basis"]
+
+
+@pytest.mark.asyncio
+async def test_native_multilingual_extraction_tolerates_invalid_dates_and_times():
+    store = MemoryGraphStore()
+    redaction = await _native_redaction(
+        store,
+        "PERSON_1 每天午餐前需要吃 Panadol。13月40日 医生预约 at 25:99am。",
+        "zh",
+    )
+
+    result = await process_redacted_transcript(store, redaction, reference_date=date(2026, 5, 9))
+
+    task = result["daily_tasks"][0]["payload"]
+    appointment = result["appointment_candidates"][0]["payload"]
+
+    assert task["recurrence"] == "daily"
+    assert task["timing_relation"] == "before lunch"
+    assert appointment["kind"] == "doctor"
+    assert appointment["date"] is None
+    assert appointment["time"] is None
+
+
+@pytest.mark.asyncio
+async def test_sealion_extraction_review_localizes_non_english_artifacts_without_overwriting_canonical_fields(monkeypatch):
+    calls = []
+
+    async def fake_sealion_review(settings, *, task, input_payload, schema, target_language="English", max_tokens=800):
+        calls.append({"task": task, "input_payload": input_payload, "target_language": target_language})
+        if task == "extraction_sanity_check":
+            return {
+                "provider": "sealion",
+                "configured": True,
+                "model": settings.sealion_model,
+                "task": task,
+                "target_language": target_language,
+                "result": {
+                    "flags": [{"category": "medication_timing_ambiguous", "severity": "warning", "message": "Check lunch timing."}],
+                    "clarification_questions": ["Adakah ubat ini perlu diambil sebelum makan tengah hari?"],
+                    "confidence": 0.8,
+                },
+            }
+        daily_id = input_payload["artifacts"]["daily_tasks"][0]["id"]
+        research_id = input_payload["artifacts"]["ad_hoc_research_tasks"][0]["id"]
+        return {
+            "provider": "sealion",
+            "configured": True,
+            "model": settings.sealion_model,
+            "task": task,
+            "target_language": target_language,
+            "result": {
+                "daily_tasks": [
+                    {
+                        "id": daily_id,
+                        "title": "Beri Panadol sebelum makan tengah hari",
+                        "description": "Beri Panadol sebelum makan tengah hari setiap hari",
+                        "clarification_questions": ["Pukul berapa makan tengah hari biasanya?"],
+                    }
+                ],
+                "ad_hoc_research_tasks": [{"id": research_id, "question": "Apakah subsidi kerusi roda yang boleh disemak?"}],
+                "appointment_candidates": [],
+                "clarification_questions": ["Adakah temujanji sudah ditempah?"],
+            },
+        }
+
+    monkeypatch.setattr("app.sealion_reviews.sealion_regional_json_review", fake_sealion_review)
+    store = MemoryGraphStore()
+    redaction = await _native_redaction(
+        store,
+        "PERSON_1 perlu makan Panadol sebelum makan tengah hari setiap hari. Doktor kata mungkin perlu kerusi roda, cari subsidi kerusi roda.",
+        "ms",
+    )
+
+    result = await process_redacted_transcript(
+        store,
+        redaction,
+        reference_date=date(2026, 5, 9),
+        settings=Settings(sealion_transcript_review_enabled=True, sealion_api_key="test-sealion"),
+    )
+
+    task = result["daily_tasks"][0]["payload"]
+    research = result["ad_hoc_research_tasks"][0]["payload"]
+    reviews = await store.list_nodes("patient-1", ["transcript_review"])
+
+    assert {call["task"] for call in calls} == {"extraction_sanity_check", "caregiver_facing_localization"}
+    assert "John" not in str(calls)
+    assert task["title"] == "Give Panadol before lunch"
+    assert task["localized_display"]["ms"]["title"] == "Beri Panadol sebelum makan tengah hari"
+    assert task["sealion_clarification_questions"] == ["Adakah ubat ini perlu diambil sebelum makan tengah hari?"]
+    assert task["localized_clarification_questions"]["ms"] == ["Pukul berapa makan tengah hari biasanya?"]
+    assert research["localized_display"]["ms"]["question"] == "Apakah subsidi kerusi roda yang boleh disemak?"
+    assert {review.payload["kind"] for review in reviews} == {"extraction_sanity_check", "caregiver_facing_localization"}

@@ -6,8 +6,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from .config import Settings
 from .models import Node
 from .privacy import rehydrate_placeholders
+from .sealion_reviews import maybe_localize_artifacts_with_sealion, maybe_review_extraction_with_sealion
 from .store import GraphStore
 
 
@@ -113,6 +115,66 @@ WARNING_CUES = ("doctor said", "clinician said", "warned", "risk", "may need", "
 APPOINTMENT_CUES = ("appointment", "visit", "review", "see the doctor", "physio", "lab")
 BODY_PARTS = ("knee", "leg", "foot", "ankle", "hand", "arm", "eye", "heart", "kidney")
 CONDITIONS = ("diabetes", "high blood sugar", "parkinson", "dementia", "stroke", "hypertension")
+NATIVE_DAILY_CUES = {
+    "ms": ("setiap hari", "tiap hari", "harian"),
+    "ta": ("தினமும்", "ஒவ்வொரு நாளும்"),
+    "zh": ("每天", "每日"),
+    "th": ("ทุกวัน",),
+}
+NATIVE_MEAL_TIMING = {
+    "ms": {
+        "sebelum sarapan": "before breakfast",
+        "selepas sarapan": "after breakfast",
+        "sebelum makan tengah hari": "before lunch",
+        "selepas makan tengah hari": "after lunch",
+        "sebelum makan malam": "before dinner",
+        "selepas makan malam": "after dinner",
+    },
+    "ta": {
+        "காலை உணவுக்கு முன்": "before breakfast",
+        "காலை உணவுக்குப் பிறகு": "after breakfast",
+        "மதிய உணவுக்கு முன்": "before lunch",
+        "மதிய உணவுக்குப் பிறகு": "after lunch",
+        "இரவு உணவுக்கு முன்": "before dinner",
+        "இரவு உணவுக்குப் பிறகு": "after dinner",
+    },
+    "zh": {
+        "早餐前": "before breakfast",
+        "早餐后": "after breakfast",
+        "午餐前": "before lunch",
+        "午餐后": "after lunch",
+        "晚餐前": "before dinner",
+        "晚餐后": "after dinner",
+    },
+    "th": {
+        "ก่อนอาหารเช้า": "before breakfast",
+        "หลังอาหารเช้า": "after breakfast",
+        "ก่อนอาหารกลางวัน": "before lunch",
+        "หลังอาหารกลางวัน": "after lunch",
+        "ก่อนอาหารเย็น": "before dinner",
+        "หลังอาหารเย็น": "after dinner",
+        "ก่อนอาหารค่ำ": "before dinner",
+        "หลังอาหารค่ำ": "after dinner",
+    },
+}
+NATIVE_APPOINTMENT_CUES = {
+    "ms": ("temu janji", "jumpa doktor", "klinik", "fisioterapi", "fisio"),
+    "ta": ("மருத்துவர்", "கிளினிக்", "சந்திப்பு", "பிசியோ"),
+    "zh": ("预约", "复诊", "医生", "诊所", "物理治疗"),
+    "th": ("นัด", "พบแพทย์", "หมอ", "คลินิก", "กายภาพบำบัด", "แล็บ"),
+}
+NATIVE_RESEARCH_CUES = {
+    "ms": ("subsidi", "geran", "bantuan kewangan", "kerusi roda", "sokongan"),
+    "ta": ("மானியம்", "உதவி", "சக்கர நாற்காலி", "நிதி உதவி"),
+    "zh": ("补助", "津贴", "资助", "轮椅", "援助"),
+    "th": ("เงินอุดหนุน", "เงินช่วยเหลือ", "ทุน", "รถเข็น", "ความช่วยเหลือ"),
+}
+NATIVE_WARNING_CUES = {
+    "ms": ("doktor kata", "mungkin perlu", "risiko"),
+    "ta": ("மருத்துவர் சொன்னார்", "தேவைப்படலாம்", "ஆபத்து"),
+    "zh": ("医生说", "可能需要", "风险"),
+    "th": ("หมอบอก", "อาจต้อง", "ความเสี่ยง"),
+}
 
 
 def extract_entities_from_redaction(redaction: Node, reference_date: date | None = None) -> ExtractedEntities:
@@ -121,7 +183,19 @@ def extract_entities_from_redaction(redaction: Node, reference_date: date | None
     text = str(redaction.payload.get("redacted_text") or "")
     placeholder_map = _placeholder_map(redaction)
     today = reference_date or datetime.now(UTC).date()
+    language = str(redaction.payload.get("detected_language") or redaction.payload.get("requested_language") or redaction.payload.get("original_language") or "")
 
+    entities = _extract_entities_from_text(text, placeholder_map, today)
+    original_text = str(redaction.payload.get("original_redacted_text") or "").strip()
+    native_text = original_text or text
+    if native_text and language in NATIVE_DAILY_CUES:
+        entities = _merge_entities(entities, _extract_native_entities(native_text, language, placeholder_map, today))
+    if not entities.actionables:
+        entities.clarifications_needed.append("No clear actionable care instruction was found.")
+    return entities
+
+
+def _extract_entities_from_text(text: str, placeholder_map: dict[str, str], today: date) -> ExtractedEntities:
     entities = ExtractedEntities(
         people=[
             ExtractedPerson(placeholder_id=placeholder, display_name_redacted=placeholder)
@@ -137,9 +211,71 @@ def extract_entities_from_redaction(redaction: Node, reference_date: date | None
         clarifications_needed=[],
     )
     entities.actionables = _extract_actionables(text, entities)
-    if not entities.actionables:
-        entities.clarifications_needed.append("No clear actionable care instruction was found.")
     return entities
+
+
+def _extract_native_entities(text: str, language: str, placeholder_map: dict[str, str], today: date) -> ExtractedEntities:
+    entities = ExtractedEntities(
+        people=[
+            ExtractedPerson(placeholder_id=placeholder, display_name_redacted=placeholder)
+            for placeholder in sorted(placeholder_map)
+            if placeholder.startswith(("PERSON_", "PATIENT_", "CAREGIVER_"))
+        ],
+        medications=_extract_native_medications(text, language),
+        time_expressions=_extract_native_time_expressions(text, today),
+        recurrences=_extract_native_recurrences(text, language, today),
+        appointments=[],
+        actionables=[],
+        medical_context=_extract_native_medical_context(text, language),
+        clarifications_needed=[],
+    )
+    entities.appointments = _extract_native_appointments(text, language, today, entities.time_expressions)
+    entities.actionables = _extract_native_actionables(text, language, entities)
+    return entities
+
+
+def _merge_entities(primary: ExtractedEntities, native: ExtractedEntities) -> ExtractedEntities:
+    by_bucket = {item.bucket_hint for item in primary.actionables}
+    return ExtractedEntities(
+        people=_unique_models([*primary.people, *native.people], lambda item: item.placeholder_id),
+        medications=_merge_medications(primary.medications, native.medications),
+        time_expressions=_unique_models(
+            [*primary.time_expressions, *native.time_expressions],
+            lambda item: f"{item.raw_text}|{item.normalized_date}|{item.normalized_time_window}",
+        ),
+        recurrences=_unique_models([*primary.recurrences, *native.recurrences], lambda item: f"{item.pattern}|{item.start_date}"),
+        appointments=_unique_models([*primary.appointments, *native.appointments], lambda item: f"{item.kind}|{item.date}|{item.time}"),
+        actionables=[*primary.actionables, *[item for item in native.actionables if item.bucket_hint not in by_bucket]],
+        medical_context=ExtractedMedicalContext(
+            conditions=sorted(set(primary.medical_context.conditions + native.medical_context.conditions)),
+            body_parts=sorted(set(primary.medical_context.body_parts + native.medical_context.body_parts)),
+            risks=sorted(set(primary.medical_context.risks + native.medical_context.risks)),
+            clinician_warnings=sorted(set(primary.medical_context.clinician_warnings + native.medical_context.clinician_warnings)),
+        ),
+        clarifications_needed=list(dict.fromkeys(primary.clarifications_needed + native.clarifications_needed)),
+    )
+
+
+def _merge_medications(primary: list[ExtractedMedication], native: list[ExtractedMedication]) -> list[ExtractedMedication]:
+    by_name = {item.name.lower(): item for item in primary}
+    for item in native:
+        key = item.name.lower()
+        existing = by_name.get(key)
+        if not existing:
+            by_name[key] = item
+            continue
+        by_name[key] = existing.model_copy(
+            update={
+                "dose": existing.dose or item.dose,
+                "quantity": existing.quantity or item.quantity,
+                "route": existing.route or item.route,
+                "frequency": existing.frequency or item.frequency,
+                "timing_relation": existing.timing_relation or item.timing_relation,
+                "fixed_time_required": existing.fixed_time_required or item.fixed_time_required,
+                "safety_notes": list(dict.fromkeys(existing.safety_notes + item.safety_notes)),
+            }
+        )
+    return list(by_name.values())
 
 
 def triage_extracted_entities(entities: ExtractedEntities) -> TriageResult:
@@ -177,6 +313,7 @@ async def process_redacted_transcript(
     store: GraphStore,
     redaction: Node,
     reference_date: date | None = None,
+    settings: Settings | None = None,
 ) -> dict[str, Any]:
     existing = await _existing_processed_result(store, redaction)
     if existing:
@@ -220,6 +357,28 @@ async def process_redacted_transcript(
         node = await _create_appointment_candidate(store, patient_id, appointment, triage_node, placeholder_map, redaction.reasoning_log_id)
         appointments.append(node)
 
+    extraction_review = await maybe_review_extraction_with_sealion(
+        store,
+        redaction,
+        entities_node,
+        triage_node,
+        daily_tasks,
+        research_tasks,
+        appointments,
+        settings,
+    )
+    localization_review = await maybe_localize_artifacts_with_sealion(
+        store,
+        redaction,
+        daily_tasks,
+        research_tasks,
+        appointments,
+        settings,
+    )
+    daily_tasks = await _refresh_nodes(store, daily_tasks)
+    research_tasks = await _refresh_nodes(store, research_tasks)
+    appointments = await _refresh_nodes(store, appointments)
+
     if redaction.reasoning_log_id:
         await store.append_reasoning_step(
             redaction.reasoning_log_id,
@@ -233,6 +392,8 @@ async def process_redacted_transcript(
                 "research_task_count": len(research_tasks),
                 "appointment_candidate_count": len(appointments),
                 "research_allowed": triage.research_allowed,
+                "sealion_extraction_review_id": str(extraction_review.id) if extraction_review else None,
+                "sealion_localization_review_id": str(localization_review.id) if localization_review else None,
             },
         )
 
@@ -242,6 +403,11 @@ async def process_redacted_transcript(
         "daily_tasks": [node.model_dump(mode="json") for node in daily_tasks],
         "ad_hoc_research_tasks": [node.model_dump(mode="json") for node in research_tasks],
         "appointment_candidates": [node.model_dump(mode="json") for node in appointments],
+        "transcript_reviews": [
+            node.model_dump(mode="json")
+            for node in (extraction_review, localization_review)
+            if node is not None
+        ],
     }
 
 
@@ -291,7 +457,16 @@ async def _existing_processed_result(store: GraphStore, redaction: Node) -> dict
         "daily_tasks": [node.model_dump(mode="json") for node in sorted(artifacts["daily_tasks"], key=lambda item: item.created_at)],
         "ad_hoc_research_tasks": [node.model_dump(mode="json") for node in sorted(artifacts["ad_hoc_research_tasks"], key=lambda item: item.created_at)],
         "appointment_candidates": [node.model_dump(mode="json") for node in sorted(artifacts["appointment_candidates"], key=lambda item: item.created_at)],
+        "transcript_reviews": [],
     }
+
+
+async def _refresh_nodes(store: GraphStore, nodes: list[Node]) -> list[Node]:
+    refreshed = []
+    for node in nodes:
+        latest = await store.get_node(node.id)
+        refreshed.append(latest or node)
+    return refreshed
 
 
 def _extract_medications(text: str) -> list[ExtractedMedication]:
@@ -408,6 +583,144 @@ def _financial_text(text: str) -> bool:
     return any(cue in lowered for cue in ("grant", "subsidy", "scheme", "financial assistance"))
 
 
+def _extract_native_medications(text: str, language: str) -> list[ExtractedMedication]:
+    medications = []
+    lowered = text.lower()
+    timing = _native_timing_relation(text, language)
+    frequency = _native_frequency(text, language)
+    for name in MEDICATION_NAMES:
+        if name not in lowered:
+            continue
+        display = _match_original_case(text, name)
+        dose_match = re.search(rf"\b{re.escape(display)}\b\s+(\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|units?))", text, re.IGNORECASE)
+        medications.append(
+            ExtractedMedication(
+                name=display,
+                dose=dose_match.group(1).replace(" ", "") if dose_match else None,
+                route="oral" if display.lower() in {"panadol", "paracetamol", "aspirin", "metformin", "levodopa"} else None,
+                frequency=frequency,
+                timing_relation=timing,
+                fixed_time_required=bool(timing or frequency),
+            )
+        )
+    return medications
+
+
+def _extract_native_time_expressions(text: str, today: date) -> list[ExtractedTimeExpression]:
+    expressions = _extract_time_expressions(text, today)
+    for match in re.finditer(r"\b(\d{4})-(\d{2})-(\d{2})\b", text):
+        candidate = _safe_date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        if candidate:
+            expressions.append(ExtractedTimeExpression(raw_text=match.group(0), normalized_date=candidate.isoformat(), confidence=0.95))
+    for match in re.finditer(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b", text):
+        day, month, year = map(int, match.groups())
+        candidate = _safe_date(year, month, day)
+        if candidate:
+            expressions.append(ExtractedTimeExpression(raw_text=match.group(0), normalized_date=candidate.isoformat(), confidence=0.9))
+    for match in re.finditer(r"(\d{1,2})月(\d{1,2})日(?:\s*(\d{4})年)?", text):
+        month = int(match.group(1))
+        day = int(match.group(2))
+        year = int(match.group(3)) if match.group(3) else today.year
+        candidate = _safe_date(year, month, day)
+        if not candidate:
+            continue
+        if not match.group(3) and candidate < today:
+            candidate = _safe_date(today.year + 1, month, day)
+            if not candidate:
+                continue
+        expressions.append(ExtractedTimeExpression(raw_text=match.group(0), normalized_date=candidate.isoformat(), confidence=0.85))
+    return expressions
+
+
+def _extract_native_recurrences(text: str, language: str, today: date) -> list[ExtractedRecurrence]:
+    recurrences = _extract_recurrences(text, today)
+    haystack = text.lower() if language == "ms" else text
+    if any(cue in haystack for cue in NATIVE_DAILY_CUES.get(language, ())):
+        recurrences.append(ExtractedRecurrence(pattern="daily", start_date=today.isoformat()))
+    return _unique_models(recurrences, lambda item: f"{item.pattern}|{item.start_date}")
+
+
+def _extract_native_appointments(
+    text: str,
+    language: str,
+    today: date,
+    time_expressions: list[ExtractedTimeExpression],
+) -> list[ExtractedAppointment]:
+    haystack = text.lower() if language == "ms" else text
+    if not any(cue in haystack for cue in NATIVE_APPOINTMENT_CUES.get(language, ())):
+        return []
+    kind: AppointmentKind = "other"
+    if any(cue in haystack for cue in ("fisioterapi", "fisio", "பிசியோ", "物理治疗", "กายภาพ")):
+        kind = "physio"
+    elif any(cue in haystack for cue in ("lab", "makmal", "化验", "แล็บ", "ตรวจเลือด")):
+        kind = "lab"
+    elif any(cue in haystack for cue in ("doktor", "மருத்துவர்", "医生", "หมอ", "แพทย์")):
+        kind = "doctor"
+    date_value = next((item.normalized_date for item in time_expressions if item.normalized_date), None)
+    time_value = next((item.normalized_time_window for item in time_expressions if item.normalized_time_window and re.match(r"^\d{2}:\d{2}$", item.normalized_time_window)), None)
+    return [ExtractedAppointment(kind=kind, date=date_value, time=time_value, requires_calendar_write=bool(date_value))]
+
+
+def _extract_native_medical_context(text: str, language: str) -> ExtractedMedicalContext:
+    haystack = text.lower() if language == "ms" else text
+    risks = [cue for cue in NATIVE_WARNING_CUES.get(language, ()) if cue in haystack]
+    return ExtractedMedicalContext(
+        conditions=[condition for condition in CONDITIONS if condition in haystack],
+        risks=risks,
+        clinician_warnings=risks if any(cue in haystack for cue in ("doktor", "மருத்துவர்", "医生")) else [],
+    )
+
+
+def _extract_native_actionables(text: str, language: str, entities: ExtractedEntities) -> list[ExtractedActionable]:
+    haystack = text.lower() if language == "ms" else text
+    actionables = []
+    if entities.medications or _native_frequency(text, language):
+        actionables.append(ExtractedActionable(description=_first_sentence(text), bucket_hint="daily_task", urgency="clinical" if entities.medications else "routine", confidence=0.78))
+    if entities.appointments:
+        actionables.append(ExtractedActionable(description="Create pending appointment candidate", bucket_hint="appointment", urgency="routine", confidence=0.74))
+    if any(cue in haystack for cue in NATIVE_RESEARCH_CUES.get(language, ())) and (
+        entities.medical_context.risks or any(cue in haystack for cue in ("kerusi roda", "சக்கர நாற்காலி", "轮椅", "รถเข็น"))
+    ):
+        actionables.append(ExtractedActionable(description=_native_research_description(text, language), bucket_hint="ad_hoc_research", urgency="financial", confidence=0.72))
+    return actionables
+
+
+def _native_frequency(text: str, language: str) -> str | None:
+    haystack = text.lower() if language == "ms" else text
+    if any(cue in haystack for cue in NATIVE_DAILY_CUES.get(language, ())):
+        return "daily"
+    return None
+
+
+def _native_timing_relation(text: str, language: str) -> str | None:
+    haystack = text.lower() if language == "ms" else text
+    for phrase, canonical in NATIVE_MEAL_TIMING.get(language, {}).items():
+        if phrase in haystack:
+            return canonical
+    return None
+
+
+def _native_research_description(text: str, language: str) -> str:
+    haystack = text.lower() if language == "ms" else text
+    for sentence in re.split(r"[.!?。！？]", text):
+        check = sentence.lower() if language == "ms" else sentence
+        if any(cue in check for cue in NATIVE_RESEARCH_CUES.get(language, ())) or any(cue in check for cue in NATIVE_WARNING_CUES.get(language, ())):
+            return sentence.strip()
+    return _first_sentence(text)
+
+
+def _unique_models(items: list[Any], key_fn) -> list[Any]:
+    seen = set()
+    unique = []
+    for item in items:
+        key = key_fn(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
+
+
 async def _create_daily_task(
     store: GraphStore,
     patient_id: str,
@@ -516,26 +829,36 @@ def _timing_relation(text: str) -> str | None:
     return None
 
 
-def _normalize_day_month(day: str, month: str, today: date) -> str:
+def _normalize_day_month(day: str, month: str, today: date) -> str | None:
     month_num = datetime.strptime(month[:3].title(), "%b").month
-    candidate = date(today.year, month_num, int(day))
+    candidate = _safe_date(today.year, month_num, int(day))
+    if not candidate:
+        return None
     if candidate < today:
-        candidate = date(today.year + 1, month_num, int(day))
+        candidate = _safe_date(today.year + 1, month_num, int(day))
+        if not candidate:
+            return None
     return candidate.isoformat()
 
 
-def _normalize_month_day(month: str, day: str, year: str | None, today: date) -> str:
+def _normalize_month_day(month: str, day: str, year: str | None, today: date) -> str | None:
     month_num = datetime.strptime(month[:3].title(), "%b").month
     candidate_year = int(year) if year else today.year
-    candidate = date(candidate_year, month_num, int(day))
+    candidate = _safe_date(candidate_year, month_num, int(day))
+    if not candidate:
+        return None
     if not year and candidate < today:
-        candidate = date(today.year + 1, month_num, int(day))
+        candidate = _safe_date(today.year + 1, month_num, int(day))
+        if not candidate:
+            return None
     return candidate.isoformat()
 
 
-def _normalize_time(match: re.Match[str]) -> str:
+def _normalize_time(match: re.Match[str]) -> str | None:
     hour = int(match.group(1))
     minute = int(match.group(2) or "0")
+    if not 1 <= hour <= 12 or minute > 59:
+        return None
     meridiem = match.group(3).lower()
     if meridiem == "pm" and hour != 12:
         hour += 12
@@ -544,13 +867,20 @@ def _normalize_time(match: re.Match[str]) -> str:
     return f"{hour:02d}:{minute:02d}"
 
 
+def _safe_date(year: int, month: int, day: int) -> date | None:
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
 def _match_original_case(text: str, needle: str) -> str:
     match = re.search(rf"\b{re.escape(needle)}\b", text, re.IGNORECASE)
     return match.group(0) if match else needle
 
 
 def _first_sentence(text: str) -> str:
-    return re.split(r"[.!?]", text.strip(), maxsplit=1)[0].strip()
+    return re.split(r"[.!?。！？]", text.strip(), maxsplit=1)[0].strip()
 
 
 def _research_description(text: str) -> str:

@@ -9,6 +9,7 @@ import httpx
 
 from .config import Settings
 from .models import Node
+from .security import vendor_allowed
 from .store import GraphStore
 
 
@@ -35,6 +36,8 @@ class GoogleCalendarProvider:
         self.settings = settings
 
     async def list_events(self, start_at: datetime, end_at: datetime) -> list[CalendarEvent]:
+        if not vendor_allowed(self.settings, "google_calendar", "calendar_read"):
+            return []
         if not self.settings.google_calendar_access_token:
             return []
         url = f"{self.settings.google_calendar_api_base_url.rstrip('/')}/calendars/{self.settings.google_calendar_id}/events"

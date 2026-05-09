@@ -10,17 +10,29 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .agent.loop import run_agent_for_trigger
 from .approvals import approve_appointment_calendar_write, update_daily_task
+from .compliance import (
+    ConsentRecordCreate,
+    DataSubjectRequestCreate,
+    PrivacyIncidentCreate,
+    create_data_subject_request,
+    create_privacy_incident,
+    purge_expired_sensitive_data,
+    record_consent,
+    record_processing_activity,
+)
 from .config import get_settings
 from .demo import PATIENT, PATIENT_ID, ingest_trigger_records, seed_baseline
 from .eval import evaluate_care_plan
 from .extraction import process_redacted_transcript
 from .graph_queries import backtrace_sources, forward_actions
+from .identity import ensure_patient_identity, known_people_for_redaction, learn_alias_candidates_from_transcript, upsert_patient_alias
 from .learning import build_learning_context, create_model_evaluation, create_prompt_candidate, list_model_evaluations, list_prompt_candidates
-from .models import CaregiverNoteCreate, ClarificationUpdate, HumanEvaluationCreate, ModelEvaluationCreate, Node, NodeEdit, PromptCandidateCreate, StatusUpdate
+from .models import CaregiverNoteCreate, ClarificationUpdate, HumanEvaluationCreate, IdentityAliasCreate, ModelEvaluationCreate, Node, NodeEdit, PromptCandidateCreate, StatusUpdate
 from .notifications import build_notifications
 from .privacy import PiiRedactor, sanitize_audit_payload
 from .research import run_guarded_research_pipeline
 from .scheduler import run_next_day_schedule_check
+from .security import InMemoryRateLimiter, key_matches, rate_limit_key, require_pilot_security, sanitize_public
 from .transcript_pipeline import ingest_audio_transcription, redact_stored_transcript
 from .store import GraphStore, MemoryGraphStore, PostgresGraphStore
 from .transcription import TranscriptionError, TranscriptionInputError, normalize_transcription_language, transcribe_audio
@@ -44,10 +56,11 @@ from .v2 import (
 
 settings = get_settings()
 store: GraphStore = (
-    PostgresGraphStore(settings.database_url, settings.repo_root / "backend" / "sql" / "schema.sql")
+    PostgresGraphStore(settings.database_url, settings.repo_root / "backend" / "sql" / "schema.sql", settings.data_encryption_key)
     if settings.database_url
-    else MemoryGraphStore()
+    else MemoryGraphStore(settings.data_encryption_key)
 )
+rate_limiter = InMemoryRateLimiter()
 
 app = FastAPI(title=settings.app_name)
 app.add_middleware(
@@ -59,8 +72,20 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
 @app.on_event("startup")
 async def startup() -> None:
+    require_pilot_security(settings)
+    if "*" in [origin.strip() for origin in settings.cors_origins.split(",")]:
+        raise RuntimeError("CORS_ORIGINS must be explicit when credentials are enabled.")
     await store.init()
     if settings.legacy_demo_enabled and not await store.list_nodes(PATIENT_ID):
         await rebuild_care_plan()
@@ -79,22 +104,26 @@ async def shutdown() -> None:
 
 @app.get("/health")
 async def health() -> dict:
-    review_state = await store.get_system_state("scheduled_review")
     return {
         "ok": True,
-        "store": "postgres" if settings.database_url else "memory",
-        "scheduled_review": review_state["value"] if review_state else None,
+        "service": settings.app_name,
     }
 
 
+def require_read_access(x_api_key: str | None = Header(default=None), x_clinician_key: str | None = Header(default=None)) -> None:
+    if settings.api_read_key or settings.api_write_key or settings.clinician_review_key:
+        if not key_matches(x_api_key, [settings.api_read_key, settings.api_write_key]) and not key_matches(x_clinician_key, [settings.clinician_review_key]):
+            raise HTTPException(401, "A valid API key is required for this operation.")
+
+
 def require_write_access(x_api_key: str | None = Header(default=None)) -> None:
-    if settings.api_write_key and x_api_key != settings.api_write_key:
+    if settings.api_write_key and not key_matches(x_api_key, [settings.api_write_key]):
         raise HTTPException(401, "A valid X-API-Key is required for this operation.")
 
 
 def require_clinician_access(x_clinician_key: str | None = Header(default=None), x_api_key: str | None = Header(default=None)) -> None:
     if settings.clinician_review_key:
-        if x_clinician_key != settings.clinician_review_key:
+        if not key_matches(x_clinician_key, [settings.clinician_review_key]):
             raise HTTPException(403, "Clinician review access is required.")
         return
     require_write_access(x_api_key)
@@ -172,45 +201,66 @@ async def run_scheduled_review(force: bool = False) -> dict:
     return {"reasoning_log_id": str(log.id), "conclusion": conclusion, "review": review}
 
 
-@app.get("/patient/summary")
+@app.get("/patient/summary", dependencies=[Depends(require_read_access)])
 async def patient_summary() -> dict:
     graph = await store.graph_subset(PATIENT_ID, ["inferred_condition"])
     conditions = [node.payload.get("display_name") for node in graph.nodes if node.payload.get("display_name")]
     patient = PATIENT.model_copy(update={"key_conditions": list(dict.fromkeys(PATIENT.key_conditions + conditions))})
-    return patient.model_dump()
+    return sanitize_public(patient.model_dump())
 
 
-@app.get("/records")
+@app.get("/patient/identity", dependencies=[Depends(require_read_access)])
+async def get_patient_identity() -> dict:
+    identity = await ensure_patient_identity(store, PATIENT_ID, PATIENT.model_dump(mode="json"))
+    return sanitize_public(identity.model_dump(mode="json"))
+
+
+@app.post("/patient/identity/aliases", dependencies=[Depends(require_write_access)])
+async def create_patient_alias(alias: IdentityAliasCreate) -> dict:
+    identity = await upsert_patient_alias(
+        store,
+        PATIENT_ID,
+        PATIENT.model_dump(mode="json"),
+        alias.alias,
+        alias.entity,
+        alias.source,
+        alias.confidence,
+        alias.status,
+    )
+    return sanitize_public(identity.model_dump(mode="json"))
+
+
+@app.get("/records", dependencies=[Depends(require_read_access)])
 async def records() -> list[dict]:
     require_legacy_demo_enabled()
     graph = await store.graph_subset(PATIENT_ID)
     record_nodes = [node for node in graph.nodes if node.type == "nehr_record"]
-    return [
+    return sanitize_public([
         {**node.model_dump(mode="json"), "forward_actions": [action.model_dump(mode="json") for action in forward_actions(node, graph.nodes, graph.edges)]}
         for node in record_nodes
-    ]
+    ])
 
 
-@app.get("/records/{record_id}")
+@app.get("/records/{record_id}", dependencies=[Depends(require_read_access)])
 async def record_detail(record_id: UUID) -> dict:
     require_legacy_demo_enabled()
     graph = await store.graph_subset(PATIENT_ID)
     node = await store.get_node(record_id)
     if not node:
         raise HTTPException(404, "Record not found")
-    return {
+    return sanitize_public({
         **node.model_dump(mode="json"),
         "forward_actions": [action.model_dump(mode="json") for action in forward_actions(node, graph.nodes, graph.edges)],
-    }
+    })
 
 
-@app.get("/events")
+@app.get("/events", dependencies=[Depends(require_read_access)])
 async def events() -> list[dict]:
     nodes = await store.list_nodes(PATIENT_ID, ["scheduled_action"])
-    return [with_scheduling_metadata(node).model_dump(mode="json") for node in nodes if node.status != "dismissed"]
+    return sanitize_public([with_scheduling_metadata(node).model_dump(mode="json") for node in nodes if node.status != "dismissed"])
 
 
-@app.get("/events/{event_id}")
+@app.get("/events/{event_id}", dependencies=[Depends(require_read_access)])
 async def event_detail(event_id: UUID) -> dict:
     graph = await store.graph_subset(PATIENT_ID)
     node = await store.get_node(event_id)
@@ -221,7 +271,7 @@ async def event_detail(event_id: UUID) -> dict:
     related_ids = {edge.from_node for edge in related_edges} | {edge.to_node for edge in related_edges}
     related_nodes = [item for item in graph.nodes if item.id in related_ids and item.id != event_id]
     log = await store.get_reasoning_log(node.reasoning_log_id) if node.reasoning_log_id else None
-    return {
+    return sanitize_public({
         **node.model_dump(mode="json"),
         "source_records": [source.model_dump(mode="json") for source in backtrace_sources(node, graph.nodes, graph.edges)],
         "related_nodes": [item.model_dump(mode="json") for item in related_nodes],
@@ -229,10 +279,10 @@ async def event_detail(event_id: UUID) -> dict:
         "reasoning_log": log.model_dump(mode="json") if log else None,
         "reasoning_narrative": event_reasoning_narrative(node, graph, log),
         "appointment_prep": build_appointment_prep(node, graph),
-    }
+    })
 
 
-@app.get("/calendar.ics")
+@app.get("/calendar.ics", dependencies=[Depends(require_read_access)])
 async def calendar_export() -> Response:
     nodes = await store.list_nodes(PATIENT_ID, ["scheduled_action"])
     active = [node for node in nodes if node.status != "dismissed"]
@@ -243,7 +293,7 @@ async def calendar_export() -> Response:
     )
 
 
-@app.get("/calendar/feed.ics")
+@app.get("/calendar/feed.ics", dependencies=[Depends(require_read_access)])
 async def calendar_feed() -> Response:
     nodes = await store.list_nodes(PATIENT_ID, ["scheduled_action"])
     active = [node for node in nodes if node.status != "dismissed"]
@@ -253,16 +303,16 @@ async def calendar_feed() -> Response:
     )
 
 
-@app.get("/memory")
+@app.get("/memory", dependencies=[Depends(require_read_access)])
 async def memory_profile() -> dict:
-    return await load_memory_profile(store, PATIENT_ID)
+    return sanitize_public(await load_memory_profile(store, PATIENT_ID))
 
 
-@app.get("/care-plan/review")
+@app.get("/care-plan/review", dependencies=[Depends(require_read_access)])
 async def care_plan_review() -> dict:
     graph = await store.graph_subset(PATIENT_ID)
     logs = await store.list_reasoning_logs()
-    return build_care_plan_review(graph, logs)
+    return sanitize_public(build_care_plan_review(graph, logs))
 
 
 @app.post("/care-plan/rereason", dependencies=[Depends(require_write_access)])
@@ -270,14 +320,17 @@ async def care_plan_rereason() -> dict:
     return await run_scheduled_review(force=True)
 
 
-@app.get("/forecast")
+@app.get("/forecast", dependencies=[Depends(require_read_access)])
 async def forecast() -> list[dict]:
-    return build_forecast(await store.graph_subset(PATIENT_ID))
+    return sanitize_public(build_forecast(await store.graph_subset(PATIENT_ID)))
 
 
 @app.post("/caregiver-notes", dependencies=[Depends(require_write_access)])
 async def caregiver_notes(note: CaregiverNoteCreate) -> dict:
-    return await process_caregiver_note(store, PATIENT_ID, note.text, note.recorded_at, settings)
+    await record_consent(store, PATIENT_ID, "caregiver_note_processing")
+    result = await process_caregiver_note(store, PATIENT_ID, note.text, note.recorded_at, settings)
+    await record_processing_activity(store, PATIENT_ID, "caregiver_note_processing", ["caregiver_note", "health_context"])
+    return sanitize_public(result)
 
 
 @app.patch("/care-intents/{node_id}/clarification", dependencies=[Depends(require_write_access)])
@@ -287,15 +340,16 @@ async def clarify_caregiver_intent(node_id: UUID, update: ClarificationUpdate) -
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
     await refresh_memory_profile(store, PATIENT_ID)
-    return result
+    return sanitize_public(result)
 
 
 @app.post("/transcribe", dependencies=[Depends(require_write_access)])
 async def transcribe(request: Request, language: str | None = Query(default=None)) -> dict:
+    rate_limiter.check(rate_limit_key(request, "transcribe"), settings.transcription_rate_limit, 3600)
     try:
         request_settings = transcription_settings_for_language(language)
         result = await transcribe_audio(await request.body(), request.headers.get("content-type"), request_settings)
-        return result.model_dump()
+        return sanitize_public(result.model_dump())
     except TranscriptionInputError as exc:
         raise HTTPException(422 if "Unsupported transcription language" in str(exc) else exc.status_code, str(exc)) from exc
     except TranscriptionError as exc:
@@ -304,9 +358,22 @@ async def transcribe(request: Request, language: str | None = Query(default=None
 
 @app.post("/transcriptions", dependencies=[Depends(require_write_access)])
 async def create_transcription(request: Request, language: str | None = Query(default=None)) -> dict:
+    rate_limiter.check(rate_limit_key(request, "transcriptions"), settings.transcription_rate_limit, 3600)
     try:
         request_settings = transcription_settings_for_language(language)
-        return await ingest_audio_transcription(store, PATIENT_ID, await request.body(), request.headers.get("content-type"), request_settings)
+        await record_consent(store, PATIENT_ID, "audio_transcription")
+        result = await ingest_audio_transcription(store, PATIENT_ID, await request.body(), request.headers.get("content-type"), request_settings)
+        transcript_id = result.get("transcript", {}).get("id")
+        await record_processing_activity(
+            store,
+            PATIENT_ID,
+            "audio_transcription",
+            ["audio", "transcript", "health_context"],
+            transcript_id,
+            request_settings.transcription_provider,
+            "provider_default",
+        )
+        return sanitize_public(result)
     except TranscriptionInputError as exc:
         raise HTTPException(422 if "Unsupported transcription language" in str(exc) else exc.status_code, str(exc)) from exc
     except TranscriptionError as exc:
@@ -325,8 +392,8 @@ async def redact_transcript(transcript_id: UUID) -> dict:
     transcript = await store.get_node(transcript_id)
     if not transcript or transcript.type != "transcript":
         raise HTTPException(404, "Transcript not found")
-    redaction = await redact_stored_transcript(store, transcript, settings)
-    return redaction.model_dump(mode="json")
+    redaction = await _redact_transcript_with_identity(transcript)
+    return sanitize_public(redaction.model_dump(mode="json"))
 
 
 @app.post("/transcriptions/{session_id}/process", dependencies=[Depends(require_write_access)])
@@ -335,7 +402,7 @@ async def process_transcription(session_id: UUID) -> dict:
     if not transcript:
         raise HTTPException(404, "Transcript not found for transcription session")
     redaction = await _redaction_for_transcript(transcript)
-    return await process_redacted_transcript(store, redaction)
+    return sanitize_public(await process_redacted_transcript(store, redaction, settings=settings))
 
 
 @app.post("/transcripts/{transcript_id}/process", dependencies=[Depends(require_write_access)])
@@ -344,7 +411,7 @@ async def process_transcript(transcript_id: UUID) -> dict:
     if not transcript or transcript.type != "transcript":
         raise HTTPException(404, "Transcript not found")
     redaction = await _redaction_for_transcript(transcript)
-    return await process_redacted_transcript(store, redaction)
+    return sanitize_public(await process_redacted_transcript(store, redaction, settings=settings))
 
 
 async def _transcript_for_session(session_id: UUID):
@@ -365,31 +432,37 @@ async def _redaction_for_transcript(transcript: Node):
             redaction = await store.get_node(edge.to_node)
             if redaction and redaction.type == "pii_redaction":
                 return redaction
-    return await redact_stored_transcript(store, transcript, settings)
+    return await _redact_transcript_with_identity(transcript)
 
 
-@app.get("/resources/search")
+async def _redact_transcript_with_identity(transcript: Node):
+    await learn_alias_candidates_from_transcript(store, transcript, PATIENT.model_dump(mode="json"))
+    known_people = await known_people_for_redaction(store, PATIENT_ID, PATIENT.model_dump(mode="json"))
+    return await redact_stored_transcript(store, transcript, settings, known_people=known_people)
+
+
+@app.get("/resources/search", dependencies=[Depends(require_read_access)])
 async def resource_search(topic: str, condition: str | None = None) -> list[dict]:
     query = f"{topic} {condition or ''}".strip()
-    return await search_verified_resources(query, settings)
+    return sanitize_public(await search_verified_resources(query, settings))
 
 
-@app.get("/grants/search")
+@app.get("/grants/search", dependencies=[Depends(require_read_access)])
 async def grant_search(condition: str) -> list[dict]:
-    return await search_verified_grants(condition, settings)
+    return sanitize_public(await search_verified_grants(condition, settings))
 
 
-@app.get("/notifications")
+@app.get("/notifications", dependencies=[Depends(require_read_access)])
 async def notifications() -> list[dict]:
     graph = await store.graph_subset(PATIENT_ID)
     logs = await store.list_reasoning_logs()
-    return build_notifications(graph, logs)
+    return sanitize_public(build_notifications(graph, logs))
 
 
-@app.get("/tasks/daily")
+@app.get("/tasks/daily", dependencies=[Depends(require_read_access)])
 async def daily_tasks() -> list[dict]:
     nodes = await store.list_nodes(PATIENT_ID, ["daily_task"])
-    return [node.model_dump(mode="json") for node in nodes if node.status != "dismissed"]
+    return sanitize_public([node.model_dump(mode="json") for node in nodes if node.status != "dismissed"])
 
 
 @app.patch("/tasks/daily/{task_id}", dependencies=[Depends(require_write_access)])
@@ -398,20 +471,20 @@ async def patch_daily_task(task_id: UUID, patch: dict) -> dict:
     if not task or task.type != "daily_task":
         raise HTTPException(404, "Daily task not found")
     try:
-        return await update_daily_task(store, PATIENT_ID, task, patch)
+        return sanitize_public(await update_daily_task(store, PATIENT_ID, task, patch))
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
 
 @app.post("/scheduler/next-day-check", dependencies=[Depends(require_write_access)])
 async def scheduler_next_day_check() -> dict:
-    return await run_next_day_schedule_check(store, PATIENT_ID, settings)
+    return sanitize_public(await run_next_day_schedule_check(store, PATIENT_ID, settings))
 
 
-@app.get("/research/tasks")
+@app.get("/research/tasks", dependencies=[Depends(require_read_access)])
 async def research_tasks() -> list[dict]:
     nodes = await store.list_nodes(PATIENT_ID, ["ad_hoc_research_task"])
-    return [node.model_dump(mode="json") for node in nodes if node.status != "dismissed"]
+    return sanitize_public([node.model_dump(mode="json") for node in nodes if node.status != "dismissed"])
 
 
 @app.post("/research/tasks/{task_id}/run", dependencies=[Depends(require_write_access)])
@@ -419,13 +492,13 @@ async def run_research_task(task_id: UUID) -> dict:
     task = await store.get_node(task_id)
     if not task or task.type != "ad_hoc_research_task":
         raise HTTPException(404, "Research task not found")
-    return await run_guarded_research_pipeline(store, task, settings)
+    return sanitize_public(await run_guarded_research_pipeline(store, task, settings))
 
 
-@app.get("/recommendations")
+@app.get("/recommendations", dependencies=[Depends(require_read_access)])
 async def recommendations() -> list[dict]:
     nodes = await store.list_nodes(PATIENT_ID, ["synthesized_recommendation"])
-    return [node.model_dump(mode="json") for node in nodes if node.status != "dismissed"]
+    return sanitize_public([node.model_dump(mode="json") for node in nodes if node.status != "dismissed"])
 
 
 @app.post("/appointments/{appointment_id}/approve-calendar-write", dependencies=[Depends(require_write_access)])
@@ -434,7 +507,7 @@ async def approve_appointment_write(appointment_id: UUID) -> dict:
     if not appointment or appointment.type != "appointment_candidate":
         raise HTTPException(404, "Appointment candidate not found")
     try:
-        return await approve_appointment_calendar_write(store, PATIENT_ID, appointment, settings)
+        return sanitize_public(await approve_appointment_calendar_write(store, PATIENT_ID, appointment, settings))
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -459,7 +532,7 @@ async def update_status(node_id: UUID, update: StatusUpdate) -> dict:
     )
     await store.create_edge(feedback.id, node_id, "feedback_on")
     await refresh_memory_profile(store, PATIENT_ID)
-    return node.model_dump(mode="json")
+    return sanitize_public(node.model_dump(mode="json"))
 
 
 @app.patch("/nodes/{node_id}", dependencies=[Depends(require_write_access)])
@@ -483,21 +556,21 @@ async def edit_node(node_id: UUID, edit: NodeEdit) -> dict:
     )
     await store.create_edge(feedback.id, node_id, "feedback_on")
     await refresh_memory_profile(store, PATIENT_ID)
-    return node.model_dump(mode="json")
+    return sanitize_public(node.model_dump(mode="json"))
 
 
-@app.get("/audit")
+@app.get("/audit", dependencies=[Depends(require_read_access)])
 async def audit_logs() -> list[dict]:
     patient = PATIENT.model_dump(mode="json")
-    return [sanitize_audit_payload(log.model_dump(mode="json"), patient) for log in await store.list_reasoning_logs()]
+    return sanitize_public([sanitize_audit_payload(log.model_dump(mode="json"), patient) for log in await store.list_reasoning_logs()])
 
 
-@app.get("/audit/{log_id}")
+@app.get("/audit/{log_id}", dependencies=[Depends(require_read_access)])
 async def audit_detail(log_id: UUID) -> dict:
     log = await store.get_reasoning_log(log_id)
     if not log:
         raise HTTPException(404, "Reasoning log not found")
-    return sanitize_audit_payload(log.model_dump(mode="json"), PATIENT.model_dump(mode="json"))
+    return sanitize_public(sanitize_audit_payload(log.model_dump(mode="json"), PATIENT.model_dump(mode="json")))
 
 
 @app.post("/dev/redact", dependencies=[Depends(require_write_access)])
@@ -505,12 +578,50 @@ async def dev_redact(payload: dict) -> dict:
     redactor = PiiRedactor()
     redactor.seed_from_patient(PATIENT.model_dump(mode="json"))
     redacted = redactor.redact(payload)
-    return {"redacted": redacted, "privacy": redactor.summary()}
+    return sanitize_public({"redacted": redacted, "privacy": redactor.summary()})
 
 
-@app.get("/eval/care-plan")
+@app.post("/privacy/consents", dependencies=[Depends(require_write_access)])
+async def create_consent_record(consent: ConsentRecordCreate) -> dict:
+    node = await record_consent(store, PATIENT_ID, consent.purpose, consent.notice_version, consent.channel, consent.granted)
+    return sanitize_public(node.model_dump(mode="json"))
+
+
+@app.get("/privacy/consents", dependencies=[Depends(require_read_access)])
+async def consent_records() -> list[dict]:
+    return sanitize_public([node.model_dump(mode="json") for node in await store.list_nodes(PATIENT_ID, ["consent_record"])])
+
+
+@app.post("/privacy/requests", dependencies=[Depends(require_write_access)])
+async def create_privacy_request(request: DataSubjectRequestCreate) -> dict:
+    node = await create_data_subject_request(store, PATIENT_ID, request)
+    return sanitize_public(node.model_dump(mode="json"))
+
+
+@app.get("/privacy/requests", dependencies=[Depends(require_read_access)])
+async def privacy_requests() -> list[dict]:
+    return sanitize_public([node.model_dump(mode="json") for node in await store.list_nodes(PATIENT_ID, ["data_subject_request"])])
+
+
+@app.post("/privacy/incidents", dependencies=[Depends(require_clinician_access)])
+async def create_incident(incident: PrivacyIncidentCreate) -> dict:
+    node = await create_privacy_incident(store, incident)
+    return sanitize_public(node.model_dump(mode="json"))
+
+
+@app.get("/privacy/incidents", dependencies=[Depends(require_clinician_access)])
+async def privacy_incidents() -> list[dict]:
+    return sanitize_public([node.model_dump(mode="json") for node in await store.list_nodes(None, ["privacy_incident"])])
+
+
+@app.post("/privacy/retention/purge", dependencies=[Depends(require_clinician_access)])
+async def retention_purge() -> dict:
+    return await purge_expired_sensitive_data(store, PATIENT_ID, settings)
+
+
+@app.get("/eval/care-plan", dependencies=[Depends(require_read_access)])
 async def care_plan_eval() -> dict:
-    return evaluate_care_plan(await store.graph_subset(PATIENT_ID), await store.list_reasoning_logs())
+    return sanitize_public(evaluate_care_plan(await store.graph_subset(PATIENT_ID), await store.list_reasoning_logs()))
 
 
 @app.get("/learning/context", dependencies=[Depends(require_clinician_access)])

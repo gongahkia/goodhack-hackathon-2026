@@ -12,6 +12,7 @@ import httpx
 from openai import AsyncOpenAI
 
 from .config import Settings
+from .security import sanitize_provider_error, vendor_allowed
 
 
 class TranscriptionError(RuntimeError):
@@ -31,6 +32,7 @@ SUPPORTED_TRANSCRIPTION_LANGUAGES = {
     "ms": "Malay/Bahasa",
     "ta": "Tamil",
     "zh": "Mandarin Chinese",
+    "th": "Thai",
 }
 LANGUAGE_ALIASES = {
     "": None,
@@ -47,6 +49,7 @@ LANGUAGE_ALIASES = {
     "chinese": "zh",
     "mandarin chinese": "zh",
     "simplified chinese": "zh",
+    "thai": "th",
 }
 
 
@@ -114,10 +117,14 @@ async def transcribe_audio(audio: bytes, content_type: str | None, settings: Set
                 raise
 
     if provider in {"openai", "openai-api"}:
+        if not vendor_allowed(settings, "openai", "transcription"):
+            raise TranscriptionUnavailable("OpenAI transcription is disabled for this purpose.")
         return await _transcribe_with_openai(audio, content_type, settings, requested_language)
 
     if provider in {"groq", "auto"}:
         try:
+            if not vendor_allowed(settings, "groq", "transcription"):
+                raise TranscriptionUnavailable("Groq transcription is disabled for this purpose.")
             return await _transcribe_with_groq(audio, content_type, settings, requested_language)
         except TranscriptionUnavailable as exc:
             errors.append(str(exc))
@@ -244,6 +251,8 @@ def _faster_whisper_model(model_name: str, compute_type: str):
 
 
 async def _transcribe_with_groq(audio: bytes, content_type: str | None, settings: Settings, requested_language: str | None) -> TranscriptionResult:
+    if not vendor_allowed(settings, "groq", "transcription"):
+        raise TranscriptionUnavailable("Groq transcription is disabled for this purpose.")
     if not settings.groq_api_key:
         raise TranscriptionUnavailable("Groq transcription requires GROQ_API_KEY.")
 
@@ -267,7 +276,7 @@ async def _transcribe_with_groq(audio: bytes, content_type: str | None, settings
             )
             response.raise_for_status()
     except httpx.HTTPError as exc:
-        raise TranscriptionUnavailable(f"Groq transcription failed: {exc}") from exc
+        raise TranscriptionUnavailable(f"Groq transcription failed: {sanitize_provider_error(exc)}") from exc
 
     payload = response.json()
     text = str(payload.get("text", "")).strip()
@@ -287,6 +296,8 @@ async def _transcribe_with_groq(audio: bytes, content_type: str | None, settings
 
 
 async def _transcribe_with_openai(audio: bytes, content_type: str | None, settings: Settings, requested_language: str | None) -> TranscriptionResult:
+    if not vendor_allowed(settings, "openai", "transcription"):
+        raise TranscriptionUnavailable("OpenAI transcription is disabled for this purpose.")
     if not settings.openai_api_key:
         raise TranscriptionUnavailable("OpenAI transcription requires OPENAI_API_KEY.")
 
@@ -314,9 +325,9 @@ async def _transcribe_with_openai(audio: bytes, content_type: str | None, settin
             response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         detail = _http_error_detail(exc.response)
-        raise TranscriptionUnavailable(f"OpenAI transcription failed: {detail}") from exc
+        raise TranscriptionUnavailable(f"OpenAI transcription failed: {sanitize_provider_error(detail)}") from exc
     except httpx.HTTPError as exc:
-        raise TranscriptionUnavailable(f"OpenAI transcription failed: {exc}") from exc
+        raise TranscriptionUnavailable(f"OpenAI transcription failed: {sanitize_provider_error(exc)}") from exc
 
     payload = response.json()
     text = str(payload.get("text", "")).strip()
@@ -343,6 +354,8 @@ async def normalize_transcript_to_english(text: str, source_language: str | None
         return TranscriptNormalization(None, "system", None, "not_required", language)
     if not settings.openai_api_key:
         return TranscriptNormalization(None, None, None, "unavailable_no_openai_api_key", language)
+    if not vendor_allowed(settings, "openai", "translation"):
+        return TranscriptNormalization(None, "openai", settings.openai_model, "vendor_disabled", language)
 
     client = AsyncOpenAI(api_key=settings.openai_api_key)
     try:
@@ -358,7 +371,7 @@ async def normalize_transcript_to_english(text: str, source_language: str | None
         )
         payload = json.loads(getattr(response, "output_text", "") or "{}")
     except Exception as exc:
-        return TranscriptNormalization(None, "openai", settings.openai_model, "failed", language, {"error": str(exc)})
+        return TranscriptNormalization(None, "openai", settings.openai_model, "failed", language, {"error": sanitize_provider_error(exc)})
 
     normalized = str(payload.get("normalized_english_text") or "").strip()
     if not normalized:
@@ -383,7 +396,7 @@ def normalize_transcription_language(value: str | None) -> str | None:
     if cleaned in SUPPORTED_TRANSCRIPTION_LANGUAGES:
         return cleaned
     raise TranscriptionInputError(
-        "Unsupported transcription language. Use auto, en, ms, ta, or zh."
+        "Unsupported transcription language. Use auto, en, ms, ta, zh, or th."
     )
 
 
@@ -407,6 +420,8 @@ def transcription_prompt(language: str | None) -> str | None:
         return "Transcribe Malay/Bahasa caregiver speech. Preserve medication names, dates, and clinic names exactly."
     if language == "ta":
         return "Transcribe Tamil caregiver speech in Tamil script. Preserve medication names, dates, and clinic names exactly."
+    if language == "th":
+        return "Transcribe Thai caregiver speech in Thai script. Preserve medication names, dates, and clinic names exactly."
     return None
 
 

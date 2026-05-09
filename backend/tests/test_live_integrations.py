@@ -7,6 +7,8 @@ from uuid import uuid4
 import pytest
 
 from app.config import Settings
+from app.quality import transcript_quality
+from app.sealion_reviews import sealion_guard_json_review, sealion_regional_json_review
 from app.store import PostgresGraphStore
 from app.transcription import transcribe_audio
 from app.v2 import tinyfish_search_web
@@ -31,6 +33,10 @@ requires_postgres = pytest.mark.skipif(
     not (_live_enabled("RUN_POSTGRES_INTEGRATION_TESTS") and os.getenv("TEST_DATABASE_URL")),
     reason="set RUN_POSTGRES_INTEGRATION_TESTS=1 and TEST_DATABASE_URL to run Postgres integration tests",
 )
+requires_live_sealion = pytest.mark.skipif(
+    not (_live_enabled("RUN_LIVE_SEALION_TESTS") and os.getenv("SEALION_API_KEY")),
+    reason="set RUN_LIVE_SEALION_TESTS=1 and SEALION_API_KEY to run live SEA-LION tests",
+)
 
 
 @requires_live_openai
@@ -53,6 +59,66 @@ async def test_live_openai_transcription_smoke():
     assert result.provider == "openai"
     assert result.model
     assert result.text.strip()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("language", ["en", "ms", "ta", "zh", "th"])
+async def test_live_openai_multilingual_transcription_quality(language):
+    if not _live_enabled("RUN_LIVE_OPENAI_MULTILINGUAL_TESTS") or not os.getenv("OPENAI_API_KEY"):
+        pytest.skip("set RUN_LIVE_OPENAI_MULTILINGUAL_TESTS=1 and OPENAI_API_KEY to run live multilingual transcription tests")
+    audio_path_value = os.getenv(f"LIVE_OPENAI_AUDIO_{language.upper()}_PATH")
+    reference = os.getenv(f"LIVE_OPENAI_TRANSCRIPT_{language.upper()}")
+    if not audio_path_value or not reference:
+        pytest.skip(f"set LIVE_OPENAI_AUDIO_{language.upper()}_PATH and LIVE_OPENAI_TRANSCRIPT_{language.upper()} for {language}")
+
+    audio_path = Path(audio_path_value)
+    suffix_to_type = {".wav": "audio/wav", ".webm": "audio/webm", ".mp3": "audio/mpeg", ".m4a": "audio/mp4"}
+    result = await transcribe_audio(
+        audio_path.read_bytes(),
+        suffix_to_type.get(audio_path.suffix.lower(), "application/octet-stream"),
+        Settings(
+            transcription_provider="openai",
+            openai_api_key=os.environ["OPENAI_API_KEY"],
+            openai_transcription_model=os.getenv("OPENAI_TRANSCRIPTION_MODEL", "gpt-4o-transcribe"),
+            transcription_language=language,
+        ),
+    )
+    quality = transcript_quality(reference, result.text, language)
+
+    assert result.provider == "openai"
+    assert result.text.strip()
+    assert quality["passed"], quality
+
+
+@requires_live_sealion
+@pytest.mark.asyncio
+async def test_live_sealion_regional_json_review_smoke():
+    result = await sealion_regional_json_review(
+        Settings(sealion_api_key=os.environ["SEALION_API_KEY"]),
+        task="live_transcript_qa_smoke",
+        target_language="English",
+        input_payload={"redacted_transcript": "PERSON_1 needs Panadol before lunch.", "checks": ["date/time ambiguity"]},
+        schema={"flags": [], "confidence": 0.0},
+        max_tokens=300,
+    )
+
+    assert result["provider"] == "sealion"
+    assert result["configured"] is True
+    assert result["result"] is not None, result
+
+
+@requires_live_sealion
+@pytest.mark.asyncio
+async def test_live_sealion_guard_json_review_smoke():
+    result = await sealion_guard_json_review(
+        Settings(sealion_api_key=os.environ["SEALION_API_KEY"]),
+        prompt="Research wheelchair subsidies for PERSON_1 in Singapore. Do not provide medical advice.",
+        max_tokens=200,
+    )
+
+    assert result["provider"] == "sealion_guard"
+    assert result["configured"] is True
+    assert result["result"] is not None, result
 
 
 @requires_live_tinyfish
