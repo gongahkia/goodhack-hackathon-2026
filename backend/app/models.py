@@ -20,6 +20,22 @@ NodeType = Literal[
     "decision_forecast",
     "memory_profile",
     "human_evaluation",
+    "transcription_session",
+    "transcript",
+    "pii_redaction",
+    "extracted_entities",
+    "triage_decision",
+    "daily_task",
+    "schedule_conflict",
+    "notification_candidate",
+    "ad_hoc_research_task",
+    "research_plan",
+    "guardrail_review",
+    "research_result",
+    "synthesized_recommendation",
+    "appointment_candidate",
+    "calendar_write_request",
+    "user_decision",
 ]
 
 EdgeType = Literal[
@@ -33,6 +49,19 @@ EdgeType = Literal[
     "researches",
     "scheduled_from",
     "evaluates",
+    "transcribed_to",
+    "redacted_as",
+    "triaged_from",
+    "classified_as",
+    "conflicts_with",
+    "notifies_about",
+    "guarded_by",
+    "approved_research",
+    "blocked_research",
+    "synthesized_from",
+    "requires_approval",
+    "approved_by_user",
+    "written_to_calendar",
 ]
 CreatedBy = Literal["agent", "system", "user"]
 NodeStatus = Literal["pending_review", "approved", "dismissed", "edited", "clarification_required"]

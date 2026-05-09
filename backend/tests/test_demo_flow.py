@@ -27,6 +27,7 @@ from app.v2 import (
     process_caregiver_note,
     refresh_memory_profile,
     resolve_caregiver_clarification,
+    sanitize_node_edit_payload,
     search_verified_grants,
     search_verified_resources,
     sealion_guard_check,
@@ -826,3 +827,61 @@ async def test_v2_human_evaluation_is_linked_to_decision_eval():
     assert result["human_evaluation_count"] == 1
     assert decision["human_review_count"] == 1
     assert decision["human_scores"][0]["average_score"] == 4
+
+
+@pytest.mark.asyncio
+async def test_server_rejects_unsafe_schedule_edits():
+    store = MemoryGraphStore()
+    await store.init()
+    await seed_baseline(store)
+    source = (await store.list_nodes(PATIENT_ID, ["nehr_record"]))[0]
+    action, _ = await store.create_node_with_edge(
+        "scheduled_action",
+        {
+            "patient_id": PATIENT_ID,
+            "title": "Flexible paperwork",
+            "description": "Routine documentation task.",
+            "action_type": "task",
+            "start_at": "2027-06-01T09:00:00+00:00",
+            "end_at": "2027-06-01T09:30:00+00:00",
+            "timing_type": "flexible_window",
+            "urgency": "routine",
+            "rest_interrupt_allowed": False,
+        },
+        "system",
+        None,
+        "pending_review",
+        UUID("00000000-0000-0000-0000-000000000701"),
+        source.id,
+        "derived_from",
+    )
+
+    with pytest.raises(ValueError, match="protected rest"):
+        sanitize_node_edit_payload(action, {"start_at": "2027-06-01T13:00:00+00:00", "end_at": "2027-06-01T13:30:00+00:00"})
+
+    with pytest.raises(ValueError, match="Unsupported"):
+        sanitize_node_edit_payload(action, {"reasoning_log_id": "tamper"})
+
+
+@pytest.mark.asyncio
+async def test_scheduled_review_lock_is_persistent_state():
+    store = MemoryGraphStore()
+    await store.init()
+
+    assert await store.acquire_system_lock("scheduled_review", 60) is True
+    assert await store.acquire_system_lock("scheduled_review", 60) is False
+    state = await store.get_system_state("scheduled_review")
+
+    assert state
+    assert state["locked_until"]
+
+
+def test_write_access_guard_can_be_enabled(monkeypatch):
+    from fastapi import HTTPException
+    import app.main as main
+
+    monkeypatch.setattr(main.settings, "api_write_key", "secret")
+
+    main.require_write_access("secret")
+    with pytest.raises(HTTPException):
+        main.require_write_access("wrong")

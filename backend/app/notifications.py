@@ -43,6 +43,36 @@ def build_notifications(graph: GraphSubset, logs: list[ReasoningLog] | None = No
                     }
                 )
             continue
+        if node.type == "notification_candidate":
+            items.append(
+                {
+                    "id": f"notification:{node.id}",
+                    "kind": node.payload.get("category") or "notification",
+                    "title": node.payload.get("title") or "Notification",
+                    "body": node.payload.get("body") or "",
+                    "created_at": node.created_at.isoformat(),
+                    "href": "/notifications",
+                    "source_node_id": node.payload.get("source_daily_task_id") or node.payload.get("source_conflict_id"),
+                    "node_status": node.status,
+                    "occurred_at": node.payload.get("send_at"),
+                }
+            )
+            continue
+        if node.type == "synthesized_recommendation" and node.status == "pending_review":
+            items.append(
+                {
+                    "id": f"recommendation:{node.id}:pending_review",
+                    "kind": "research result ready",
+                    "title": node.payload.get("title") or "Research result ready",
+                    "body": node.payload.get("summary") or "",
+                    "created_at": node.created_at.isoformat(),
+                    "href": "/recommendations",
+                    "source_node_id": str(node.id),
+                    "node_status": node.status,
+                    "occurred_at": node.created_at.isoformat(),
+                }
+            )
+            continue
         if node.type != "scheduled_action":
             continue
         if node.status == "pending_review":

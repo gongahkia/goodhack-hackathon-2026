@@ -22,6 +22,48 @@ DEFAULT_ALLOWED_DOMAINS = ["gov.sg", "healthhub.sg", "aic.sg", "sgenable.sg", "m
 MEMORY_PROTECTED_ACTION_TYPES = {"medication", "appointment", "grant", "falls_risk", "clinical"}
 MEMORY_LOW_RISK_ACTION_TYPES = {"therapy", "task", "resource", "education", "reminder"}
 MEMORY_PROFILE_SCHEMA_VERSION = 1
+INTENT_TYPES = {
+    "appointment_question",
+    "symptom_note",
+    "decision_forecast",
+    "follow_up_task",
+    "document_reminder",
+    "grant_research_task",
+    "general_caregiver_note",
+    "clarification_needed",
+}
+ACTION_TYPES = {"medication", "therapy", "appointment", "grant", "task"}
+TIMING_TYPES = {"fixed_time", "flexible_window", "deadline", "movable"}
+URGENCY_TYPES = {"clinical", "financial", "routine"}
+SCHEDULING_PATCH_FIELDS = {
+    "title",
+    "description",
+    "action_type",
+    "start_at",
+    "end_at",
+    "recurrence",
+    "location",
+    "agency",
+    "attachments",
+    "timing_type",
+    "urgency",
+    "estimated_effort_minutes",
+    "movable_window",
+    "rest_interrupt_allowed",
+    "scheduling_reason",
+    "caregiver_order_signal",
+    "reschedule_reason",
+}
+CLARIFICATION_PATCH_FIELDS = {
+    "intent_type",
+    "question",
+    "topic",
+    "target_date",
+    "decision_due_at",
+    "urgency",
+    "appointment_hint",
+    "confidence",
+}
 
 
 def build_memory_profile(graph: GraphSubset) -> dict[str, Any]:
@@ -385,6 +427,7 @@ async def resolve_caregiver_clarification(
     node = await store.get_node(node_id)
     if not node or node.payload.get("patient_id") != patient_id:
         raise ValueError("Clarification target not found")
+    payload_patch = sanitize_clarification_patch(node, payload_patch)
 
     graph = await store.graph_subset(patient_id)
     patch = {
@@ -491,6 +534,167 @@ async def create_human_evaluation(store: GraphStore, patient_id: str, payload: d
     )
     await store.create_edge(evaluation.id, action_id, "evaluates")
     return evaluation
+
+
+def sanitize_clarification_patch(node: Node, payload_patch: dict[str, Any]) -> dict[str, Any]:
+    if node.type not in {"care_intent", "decision_forecast"}:
+        raise ValueError("Clarification can only be resolved for care intents or decision forecasts")
+    clean = {key: value for key, value in payload_patch.items() if key in CLARIFICATION_PATCH_FIELDS}
+    if extra := sorted(set(payload_patch) - set(clean)):
+        raise ValueError(f"Unsupported clarification field(s): {', '.join(extra)}")
+    if "intent_type" in clean:
+        intent_type = str(clean["intent_type"])
+        if intent_type not in INTENT_TYPES:
+            raise ValueError("Unsupported intent_type")
+        clean["intent_type"] = intent_type
+    for key in ["question", "topic", "target_date", "decision_due_at", "urgency", "appointment_hint"]:
+        if key in clean:
+            value = str(clean[key]).strip()
+            if len(value) > 500:
+                raise ValueError(f"{key} is too long")
+            clean[key] = value
+    if "urgency" in clean and clean["urgency"] not in URGENCY_TYPES:
+        clean["urgency"] = "routine"
+    if "confidence" in clean:
+        try:
+            clean["confidence"] = max(0.0, min(1.0, float(clean["confidence"])))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("confidence must be a number between 0 and 1") from exc
+    return clean
+
+
+def sanitize_node_edit_payload(existing: Node, payload: dict[str, Any]) -> dict[str, Any]:
+    if existing.type != "scheduled_action":
+        return _sanitize_generic_payload(payload)
+    extra = sorted(set(payload) - SCHEDULING_PATCH_FIELDS)
+    if extra:
+        raise ValueError(f"Unsupported scheduled-action field(s): {', '.join(extra)}")
+    clean: dict[str, Any] = {}
+    for key, value in payload.items():
+        if key in {"title", "description", "action_type", "recurrence", "location", "agency", "timing_type", "urgency", "scheduling_reason", "reschedule_reason"}:
+            clean[key] = str(value).strip()[:1000]
+        elif key in {"start_at", "end_at"}:
+            parsed = _parse_datetime(value)
+            if not parsed:
+                raise ValueError(f"{key} must be an ISO datetime")
+            clean[key] = parsed.isoformat()
+        elif key == "estimated_effort_minutes":
+            try:
+                clean[key] = max(1, min(8 * 60, int(value)))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("estimated_effort_minutes must be a number") from exc
+        elif key == "movable_window":
+            if value is not None and not _valid_movable_window(value):
+                raise ValueError("movable_window must contain HH:MM start and end")
+            clean[key] = value
+        elif key in {"rest_interrupt_allowed"}:
+            clean[key] = bool(value)
+        elif key == "attachments":
+            clean[key] = _sanitize_attachments(value)
+        elif key == "caregiver_order_signal":
+            clean[key] = _sanitize_order_signal(value)
+    merged = normalize_scheduling_payload({**existing.payload, **clean})
+    validate_scheduled_action_payload(existing, merged)
+    return {
+        key: value
+        for key, value in merged.items()
+        if key in clean or key in {"timing_type", "urgency", "estimated_effort_minutes", "movable_window", "rest_interrupt_allowed", "scheduling_reason", "deadline_at"}
+    }
+
+
+def validate_scheduled_action_payload(existing: Node, payload: dict[str, Any]) -> None:
+    action_type = str(payload.get("action_type") or "")
+    timing_type = str(payload.get("timing_type") or "")
+    urgency = str(payload.get("urgency") or "")
+    if action_type not in ACTION_TYPES:
+        raise ValueError("Unsupported action_type")
+    if timing_type not in TIMING_TYPES:
+        raise ValueError("Unsupported timing_type")
+    if urgency not in URGENCY_TYPES:
+        raise ValueError("Unsupported urgency")
+    start = _parse_datetime(payload.get("start_at"))
+    end = _parse_datetime(payload.get("end_at")) if payload.get("end_at") else None
+    if not start:
+        raise ValueError("Scheduled actions require a valid start_at")
+    if end and end <= start:
+        raise ValueError("end_at must be after start_at")
+    if existing.payload.get("timing_type") in {"fixed_time", "deadline"} or existing.payload.get("action_type") in {"medication", "appointment", "grant"}:
+        original_start = _parse_datetime(existing.payload.get("start_at"))
+        if original_start and start != original_start and not payload.get("reschedule_reason"):
+            raise ValueError("Fixed or deadline actions need a reschedule_reason before moving")
+    if _payload_overlaps_protected_rest(payload) and not payload.get("rest_interrupt_allowed"):
+        raise ValueError("Low-risk flexible actions cannot be scheduled inside protected rest")
+
+
+def _sanitize_generic_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if len(payload) > 20:
+        raise ValueError("Too many fields in payload")
+    clean: dict[str, Any] = {}
+    for key, value in payload.items():
+        if not isinstance(key, str) or len(key) > 80:
+            raise ValueError("Invalid payload field name")
+        if isinstance(value, str):
+            clean[key] = value[:2000]
+        elif isinstance(value, (int, float, bool)) or value is None:
+            clean[key] = value
+        elif isinstance(value, dict):
+            clean[key] = {str(k)[:80]: v for k, v in list(value.items())[:20]}
+        elif isinstance(value, list):
+            clean[key] = value[:20]
+        else:
+            raise ValueError(f"Unsupported value for {key}")
+    return clean
+
+
+def _valid_movable_window(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    return all(isinstance(value.get(key), str) and re.match(r"^\d{2}:\d{2}$", value[key]) for key in ["start", "end"])
+
+
+def _sanitize_attachments(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or len(value) > 10:
+        raise ValueError("attachments must be a list of at most 10 files")
+    clean = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("attachment must be an object")
+        size = int(item.get("size") or 0)
+        if size > 5 * 1024 * 1024:
+            raise ValueError("attachments are limited to 5 MB each")
+        clean.append(
+            {
+                "id": str(item.get("id") or uuid4())[:80],
+                "name": str(item.get("name") or "attachment")[:160],
+                "type": str(item.get("type") or "application/octet-stream")[:120],
+                "size": size,
+                "data_url": str(item.get("data_url") or "")[:7_000_000],
+                "created_at": str(item.get("created_at") or datetime.now(UTC).isoformat())[:80],
+            }
+        )
+    return clean
+
+
+def _sanitize_order_signal(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise ValueError("caregiver_order_signal must be an object")
+    return {
+        "moved_at": str(value.get("moved_at") or datetime.now(UTC).isoformat())[:80],
+        "previous_start_at": str(value.get("previous_start_at") or "")[:80],
+        "preferred_block": str(value.get("preferred_block") or "")[:80],
+    }
+
+
+def _payload_overlaps_protected_rest(payload: dict[str, Any]) -> bool:
+    start = _parse_datetime(payload.get("start_at"))
+    if not start:
+        return False
+    end = _parse_datetime(payload.get("end_at"))
+    if not end:
+        end = start + timedelta(minutes=int(payload.get("estimated_effort_minutes") or 30))
+    start_hour = start.hour + start.minute / 60
+    end_hour = end.hour + end.minute / 60
+    return _hours_overlap(start_hour, end_hour, 12, 18) or _hours_overlap(start_hour, end_hour, 22, 24) or _hours_overlap(start_hour, end_hour, 0, 6)
 
 
 async def search_verified_resources(query: str, settings: Settings, allowlist: list[str] | None = None) -> list[dict[str, Any]]:

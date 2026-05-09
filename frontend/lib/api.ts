@@ -1,12 +1,16 @@
 import type { AppNotification, CaregiverNoteResult, CarePlanReview, EventDetail, ForecastItem, HumanEvalWorkflow, KgNode, MemoryProfile, PatientSummary, ReasoningLog, TranscriptionResult, VerifiedContent } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+const API_WRITE_KEY = process.env.NEXT_PUBLIC_API_WRITE_KEY;
+const CLINICIAN_REVIEW_KEY = process.env.NEXT_PUBLIC_CLINICIAN_REVIEW_KEY;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...(API_WRITE_KEY ? { "X-API-Key": API_WRITE_KEY } : {}),
+      ...(CLINICIAN_REVIEW_KEY ? { "X-Clinician-Key": CLINICIAN_REVIEW_KEY } : {}),
       ...(init?.headers || {})
     },
     cache: "no-store"
@@ -43,7 +47,8 @@ export const api = {
     const response = await fetch(`${API_BASE}/transcribe`, {
       method: "POST",
       headers: {
-        "Content-Type": audio.type || "audio/webm"
+        "Content-Type": audio.type || "audio/webm",
+        ...(API_WRITE_KEY ? { "X-API-Key": API_WRITE_KEY } : {})
       },
       body: audio,
       cache: "no-store"

@@ -13,7 +13,18 @@ GENERIC_PHONE_RE = re.compile(r"(?<!\d)(?:\+\d{1,3}[\s-]?)?(?:\d{3}[\s-]){2}\d{4
 DOB_RE = re.compile(r"\b(?:date of birth|dob|born)\s*[:\-]?\s*([0-3]?\d[ /\-.][A-Za-z]{3,9}|\d{1,4}[ /\-.]\d{1,2}[ /\-.]\d{1,4})", re.IGNORECASE)
 AGE_RE = re.compile(r"\b(age|aged)\s+(\d{1,3})\b", re.IGNORECASE)
 TITLED_NAME_RE = re.compile(r"\b(?:Mdm|Madam|Mr|Mrs|Ms)\.?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}\b")
+CONTEXTUAL_NAME_RE = re.compile(r"\b([A-Z][a-z]{1,40})(?=\s+(?:aged|age|needs|need|must|should|may|might|has|had|will|takes|take|requires|require)\b)")
 ADDRESS_HINT_RE = re.compile(r"\b(?:blk|block|unit|#\d|street|road|avenue|ave|lane|drive|postal|postcode)\b", re.IGNORECASE)
+PLACEHOLDER_RE = re.compile(r"\b[A-Z][A-Z_]*_\d+\b")
+NON_PERSON_CONTEXTUAL_NAMES = {
+    "Panadol",
+    "Paracetamol",
+    "Insulin",
+    "Metformin",
+    "Aspirin",
+    "HealthHub",
+    "Singpass",
+}
 
 KEY_CATEGORY = {
     "patient_name": "PATIENT",
@@ -33,6 +44,8 @@ KEY_CATEGORY = {
 
 @dataclass
 class PiiRedactor:
+    redact_age: bool = True
+    contextual_person_names: bool = False
     seed_identifiers: dict[str, str] = field(default_factory=dict)
     _value_to_placeholder: dict[str, str] = field(default_factory=dict)
     _placeholder_to_value: dict[str, str] = field(default_factory=dict)
@@ -75,6 +88,9 @@ class PiiRedactor:
             "placeholder_total": sum(self._placeholder_counts.values()),
         }
 
+    def placeholder_map(self) -> dict[str, str]:
+        return dict(self._placeholder_to_value)
+
     def _redact_value(self, value: Any, path: tuple[str, ...]) -> Any:
         key = path[-1].lower() if path else ""
         if isinstance(value, dict):
@@ -85,6 +101,8 @@ class PiiRedactor:
             return None
         if key == "name" and any(part.lower().startswith("patient") for part in path):
             return self._placeholder(str(value), "PATIENT")
+        if key == "age" and not self.redact_age:
+            return value
         if key in KEY_CATEGORY:
             return self._placeholder(str(value), KEY_CATEGORY[key])
         if "address" in key or "postal" in key:
@@ -111,8 +129,11 @@ class PiiRedactor:
         redacted = SG_PHONE_RE.sub(lambda match: self._placeholder(match.group(0), "PHONE"), redacted)
         redacted = GENERIC_PHONE_RE.sub(lambda match: self._placeholder(match.group(0), "PHONE"), redacted)
         redacted = DOB_RE.sub(lambda match: match.group(0).replace(match.group(1), self._placeholder(match.group(1), "DOB")), redacted)
-        redacted = AGE_RE.sub(lambda match: f"{match.group(1)} {self._placeholder(match.group(2), 'AGE')}", redacted)
+        if self.redact_age:
+            redacted = AGE_RE.sub(lambda match: f"{match.group(1)} {self._placeholder(match.group(2), 'AGE')}", redacted)
         redacted = TITLED_NAME_RE.sub(lambda match: self._placeholder(match.group(0), "PERSON"), redacted)
+        if self.contextual_person_names:
+            redacted = CONTEXTUAL_NAME_RE.sub(lambda match: self._placeholder(match.group(1), "PERSON") if match.group(1) not in NON_PERSON_CONTEXTUAL_NAMES else match.group(1), redacted)
         if ADDRESS_HINT_RE.search(redacted):
             redacted = _redact_address_fragments(redacted, self)
         return redacted
@@ -139,6 +160,27 @@ def redact_for_openai(value: Any, patient: dict[str, Any] | None = None) -> tupl
     return redactor.redact(value), redactor
 
 
+def redact_transcript_direct_pii(text: str, known_people: list[str] | None = None) -> dict[str, Any]:
+    redactor = PiiRedactor(redact_age=False, contextual_person_names=True)
+    for person in known_people or []:
+        if person.strip():
+            redactor.seed_identifiers[person.strip()] = "PERSON"
+    redacted_text = redactor.redact(text)
+    return {
+        "raw_text": text,
+        "redacted_text": redacted_text,
+        "placeholder_map": redactor.placeholder_map(),
+        "privacy": redactor.summary(),
+    }
+
+
+def rehydrate_placeholders(value: Any, placeholder_map: dict[str, str]) -> Any:
+    unknown = sorted(_unknown_placeholders(value, set(placeholder_map)))
+    if unknown:
+        raise ValueError(f"Unknown placeholder reference(s): {', '.join(unknown)}")
+    return _replace_placeholders(value, placeholder_map)
+
+
 def sanitize_audit_payload(value: Any, patient: dict[str, Any]) -> dict[str, Any]:
     redactor = PiiRedactor()
     redactor.seed_from_patient(patient)
@@ -147,6 +189,29 @@ def sanitize_audit_payload(value: Any, patient: dict[str, Any]) -> dict[str, Any
         redacted["audit_privacy"] = redactor.summary()
         return redacted
     return {"value": redacted, "audit_privacy": redactor.summary()}
+
+
+def _unknown_placeholders(value: Any, known: set[str]) -> set[str]:
+    if isinstance(value, dict):
+        return set().union(*(_unknown_placeholders(item, known) for item in value.values())) if value else set()
+    if isinstance(value, list):
+        return set().union(*(_unknown_placeholders(item, known) for item in value)) if value else set()
+    if isinstance(value, str):
+        return {placeholder for placeholder in PLACEHOLDER_RE.findall(value) if placeholder not in known}
+    return set()
+
+
+def _replace_placeholders(value: Any, placeholder_map: dict[str, str]) -> Any:
+    if isinstance(value, dict):
+        return {key: _replace_placeholders(item, placeholder_map) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_replace_placeholders(item, placeholder_map) for item in value]
+    if isinstance(value, str):
+        restored = value
+        for placeholder, raw in sorted(placeholder_map.items(), key=lambda item: len(item[0]), reverse=True):
+            restored = restored.replace(placeholder, raw)
+        return restored
+    return value
 
 
 def _name_variants(name: str) -> set[str]:

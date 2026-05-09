@@ -700,3 +700,11 @@ Production quality metrics:
 - 2026-05-09: Added daily scheduled task vs ad hoc research task triage design.
 - 2026-05-09: Added next-day-only Google Calendar deconfliction and 10pm Singapore conflict notification job.
 - 2026-05-09: Added guarded research pipeline with planner, auditor, tools, and synthesis stages.
+- 2026-05-09: Implemented Phase 1 graph foundation by adding transcript-first node and edge types to backend models and Postgres schema while preserving existing graph store behavior.
+- 2026-05-09: Started Phase 3 before destructive Phase 2 removal so the backend has a working transcript-first ingestion path before old NEHR/demo runtime paths are quarantined.
+- 2026-05-09: Added OpenAI audio transcription provider support, transcription-session/transcript graph persistence, local direct-identifier transcript redaction, placeholder maps, and rehydration validation.
+- 2026-05-09: Implemented Phase 2 runtime quarantine by disabling NEHR/demo bootstrapping, demo ingest/reset endpoints, NEHR record endpoints, and scheduled demo review unless `LEGACY_DEMO_ENABLED=true`.
+- 2026-05-09: Implemented Phase 4 extraction and triage with strict entity schemas, conservative daily/ad hoc/appointment bucket classification, graph artifact creation, and guardrail logic blocking speculative research from simple medication reminders.
+- 2026-05-09: Implemented Phase 5 daily scheduler with next-day-only Google Calendar read adapter, fixed/movable conflict classification, three-times-daily medication spacing checks, persisted schedule conflict nodes, notification candidates, and polling-friendly notification output.
+- 2026-05-09: Implemented Phase 6 guarded research pipeline with redacted research planning, guardrail approval/blocking, TinyFish/Exa-capable source-tier adapters, citation freshness capture, strict synthesized recommendation schema, and recommendation polling.
+- 2026-05-09: Implemented Phase 7 approval workflows with daily task edit overrides, caregiver feedback nodes, explicit appointment approval before Google Calendar insert, and audited calendar write success/failure states.

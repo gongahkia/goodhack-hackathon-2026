@@ -18,7 +18,8 @@ class Settings(BaseSettings):
     sealion_base_url: str = "https://api.sea-lion.ai/v1"
     sealion_model: str = "aisingapore/Gemma-SEA-LION-v4-27B-IT"
     sealion_guard_model: str = "aisingapore/SEA-Guard"
-    transcription_provider: str = "local"
+    transcription_provider: str = "openai"
+    openai_transcription_model: str = "gpt-4o-transcribe"
     local_transcription_backend: str = "auto"
     mlx_whisper_model: str = "mlx-community/whisper-large-v3-turbo-q4"
     faster_whisper_model: str = "base.en"
@@ -29,13 +30,17 @@ class Settings(BaseSettings):
     transcription_max_bytes: int = 25 * 1024 * 1024
     transcription_timeout_seconds: int = 120
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    legacy_demo_enabled: bool = False
     demo_agent_mode: str = "auto"
-    scheduled_review_enabled: bool = True
+    scheduled_review_enabled: bool = False
     scheduled_review_interval_seconds: int = 86400
     live_search_llm_verification: bool = True
     api_write_key: str | None = None
     clinician_review_key: str | None = None
     scheduled_review_lock_ttl_seconds: int = 3600
+    google_calendar_id: str = "primary"
+    google_calendar_access_token: str | None = None
+    google_calendar_api_base_url: str = "https://www.googleapis.com/calendar/v3"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

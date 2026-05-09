@@ -30,13 +30,15 @@ class TranscriptionResult:
     provider: str
     model: str
     language: str | None = None
+    metadata: dict[str, Any] | None = None
 
-    def model_dump(self) -> dict[str, str | None]:
+    def model_dump(self) -> dict[str, Any]:
         return {
             "text": self.text,
             "provider": self.provider,
             "model": self.model,
             "language": self.language,
+            "metadata": self.metadata or {},
         }
 
 
@@ -68,6 +70,9 @@ async def transcribe_audio(audio: bytes, content_type: str | None, settings: Set
             if provider not in {"auto"}:
                 raise
 
+    if provider in {"openai", "openai-api"}:
+        return await _transcribe_with_openai(audio, content_type, settings)
+
     if provider in {"groq", "auto"}:
         try:
             return await _transcribe_with_groq(audio, content_type, settings)
@@ -76,7 +81,7 @@ async def transcribe_audio(audio: bytes, content_type: str | None, settings: Set
             raise TranscriptionUnavailable(" ".join(errors) if errors else str(exc)) from exc
 
     raise TranscriptionUnavailable(
-        f"Unknown transcription provider '{settings.transcription_provider}'. Use 'local', 'groq', or 'auto'."
+        f"Unknown transcription provider '{settings.transcription_provider}'. Use 'local', 'openai', 'groq', or 'auto'."
     )
 
 
@@ -223,7 +228,66 @@ async def _transcribe_with_groq(audio: bytes, content_type: str | None, settings
         provider="groq",
         model=settings.groq_transcription_model,
         language=settings.transcription_language or None,
+        metadata=_transcription_metadata(payload),
     )
+
+
+async def _transcribe_with_openai(audio: bytes, content_type: str | None, settings: Settings) -> TranscriptionResult:
+    if not settings.openai_api_key:
+        raise TranscriptionUnavailable("OpenAI transcription requires OPENAI_API_KEY.")
+
+    suffix = _suffix_for_content_type(content_type)
+    files = {"file": (f"recording{suffix}", audio, content_type or "application/octet-stream")}
+    data = {
+        "model": settings.openai_transcription_model,
+        "response_format": "json",
+        "temperature": "0",
+    }
+    if settings.transcription_language:
+        data["language"] = settings.transcription_language
+
+    try:
+        async with httpx.AsyncClient(timeout=settings.transcription_timeout_seconds) as client:
+            response = await client.post(
+                "https://api.openai.com/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+                data=data,
+                files=files,
+            )
+            response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        detail = _http_error_detail(exc.response)
+        raise TranscriptionUnavailable(f"OpenAI transcription failed: {detail}") from exc
+    except httpx.HTTPError as exc:
+        raise TranscriptionUnavailable(f"OpenAI transcription failed: {exc}") from exc
+
+    payload = response.json()
+    text = str(payload.get("text", "")).strip()
+    if not text:
+        raise TranscriptionInputError("No speech was detected in the audio.")
+    return TranscriptionResult(
+        text=text,
+        provider="openai",
+        model=settings.openai_transcription_model,
+        language=payload.get("language") or settings.transcription_language or None,
+        metadata=_transcription_metadata(payload),
+    )
+
+
+def _transcription_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in payload.items() if key != "text"}
+
+
+def _http_error_detail(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return response.text or f"HTTP {response.status_code}"
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict) and error.get("message"):
+            return str(error["message"])
+    return response.text or f"HTTP {response.status_code}"
 
 
 def _suffix_for_content_type(content_type: str | None) -> str:

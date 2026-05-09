@@ -20,7 +20,23 @@ create table if not exists nodes (
     'research_note',
     'decision_forecast',
     'memory_profile',
-    'human_evaluation'
+    'human_evaluation',
+    'transcription_session',
+    'transcript',
+    'pii_redaction',
+    'extracted_entities',
+    'triage_decision',
+    'daily_task',
+    'schedule_conflict',
+    'notification_candidate',
+    'ad_hoc_research_task',
+    'research_plan',
+    'guardrail_review',
+    'research_result',
+    'synthesized_recommendation',
+    'appointment_candidate',
+    'calendar_write_request',
+    'user_decision'
   )),
   payload jsonb not null,
   created_by text not null check (created_by in ('agent', 'system', 'user')),
@@ -33,7 +49,31 @@ create table if not exists edges (
   id uuid primary key,
   from_node uuid references nodes(id) on delete cascade,
   to_node uuid references nodes(id) on delete cascade,
-  type text not null check (type in ('derived_from', 'triggers', 'recommends', 'applies_to', 'feedback_on', 'extracted_from', 'clarifies', 'researches', 'scheduled_from', 'evaluates')),
+  type text not null check (type in (
+    'derived_from',
+    'triggers',
+    'recommends',
+    'applies_to',
+    'feedback_on',
+    'extracted_from',
+    'clarifies',
+    'researches',
+    'scheduled_from',
+    'evaluates',
+    'transcribed_to',
+    'redacted_as',
+    'triaged_from',
+    'classified_as',
+    'conflicts_with',
+    'notifies_about',
+    'guarded_by',
+    'approved_research',
+    'blocked_research',
+    'synthesized_from',
+    'requires_approval',
+    'approved_by_user',
+    'written_to_calendar'
+  )),
   created_at timestamptz default now()
 );
 
@@ -50,7 +90,23 @@ alter table nodes add constraint nodes_type_check check (type in (
   'research_note',
   'decision_forecast',
   'memory_profile',
-  'human_evaluation'
+  'human_evaluation',
+  'transcription_session',
+  'transcript',
+  'pii_redaction',
+  'extracted_entities',
+  'triage_decision',
+  'daily_task',
+  'schedule_conflict',
+  'notification_candidate',
+  'ad_hoc_research_task',
+  'research_plan',
+  'guardrail_review',
+  'research_result',
+  'synthesized_recommendation',
+  'appointment_candidate',
+  'calendar_write_request',
+  'user_decision'
 ));
 
 alter table nodes drop constraint if exists nodes_status_check;
@@ -67,7 +123,20 @@ alter table edges add constraint edges_type_check check (type in (
   'clarifies',
   'researches',
   'scheduled_from',
-  'evaluates'
+  'evaluates',
+  'transcribed_to',
+  'redacted_as',
+  'triaged_from',
+  'classified_as',
+  'conflicts_with',
+  'notifies_about',
+  'guarded_by',
+  'approved_research',
+  'blocked_research',
+  'synthesized_from',
+  'requires_approval',
+  'approved_by_user',
+  'written_to_calendar'
 ));
 
 create table if not exists nehr_records_raw (
