@@ -16,7 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <LanguageProvider>
           <ThemeProvider>
             <NotificationsProvider>
-              <main className="app-shell mx-auto flex min-h-screen w-full max-w-[430px] flex-col shadow-app md:my-6 md:min-h-[860px] md:rounded-[28px] md:border md:border-white/70">
+              <main className="app-shell mx-auto flex h-dvh min-h-0 w-full max-w-[430px] flex-col overflow-hidden shadow-app md:my-6 md:h-[calc(100dvh-3rem)] md:max-h-[860px] md:rounded-[28px] md:border md:border-white/70">
                 {children}
               </main>
             </NotificationsProvider>

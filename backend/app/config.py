@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     tinyfish_api_key: str | None = None
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     demo_agent_mode: str = "auto"
+    scheduled_review_enabled: bool = False
+    scheduled_review_interval_seconds: int = 86400
+    live_search_llm_verification: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

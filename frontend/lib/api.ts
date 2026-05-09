@@ -27,6 +27,7 @@ export const api = {
   calendarFeedUrl: () => `${API_BASE}/calendar/feed.ics`,
   memory: () => request<MemoryProfile>("/memory"),
   carePlanReview: () => request<CarePlanReview>("/care-plan/review"),
+  carePlanRereason: () => request<{ reasoning_log_id: string; conclusion: string; review: CarePlanReview }>("/care-plan/rereason", { method: "POST" }),
   forecast: () => request<ForecastItem[]>("/forecast"),
   resourceSearch: (topic: string, condition?: string) =>
     request<VerifiedContent[]>(`/resources/search?topic=${encodeURIComponent(topic)}${condition ? `&condition=${encodeURIComponent(condition)}` : ""}`),

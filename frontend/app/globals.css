@@ -52,6 +52,16 @@ body {
   box-shadow: var(--app-shadow);
 }
 
+.app-shell > header,
+.app-shell > nav {
+  flex-shrink: 0;
+}
+
+.app-shell > section {
+  min-height: 0;
+  overflow-y: auto;
+}
+
 button,
 a,
 input,
@@ -181,6 +191,12 @@ textarea {
 .fc .fc-timegrid-event {
   border-radius: 8px;
   box-shadow: none;
+  overflow: hidden;
+}
+
+.fc .fc-timegrid-event .fc-event-main {
+  min-width: 0;
+  overflow: hidden;
 }
 
 .fc .fc-more-link {

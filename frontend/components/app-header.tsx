@@ -1,11 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronDown, Languages } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, Languages, Settings } from "lucide-react";
 import { NotificationBell } from "@/components/notifications-provider";
+import { SettingsModal } from "@/components/settings-modal";
 import { languages, useI18n, type Language } from "@/lib/i18n";
 
 export function AppHeader({ title, subtitle }: { title: string; subtitle?: string }) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
   return (
     <header className="px-5 pb-3 pt-5">
       <div className="flex items-start justify-between gap-3">
@@ -19,8 +22,17 @@ export function AppHeader({ title, subtitle }: { title: string; subtitle?: strin
         <div className="flex shrink-0 items-center gap-2">
           <LanguageSelector />
           <NotificationBell />
+          <button
+            aria-label="Settings"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[#dfe8e2] bg-white text-moss shadow-sm"
+            onClick={() => setSettingsOpen(true)}
+            type="button"
+          >
+            <Settings className="h-5 w-5" aria-hidden="true" />
+          </button>
         </div>
       </div>
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </header>
   );
 }

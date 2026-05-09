@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, ExternalLink, FileCheck, HeartHandshake, Home, Landmark, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowRight, ExternalLink, FileCheck, Files, Gauge, HeartHandshake, Home, Landmark, Wrench } from "lucide-react";
 import { clsx } from "clsx";
 import { AppHeader } from "@/components/app-header";
 import { BottomNav } from "@/components/bottom-nav";
@@ -34,7 +34,7 @@ export default function ForecastPage() {
 
   return (
     <>
-      <AppHeader title={t("forecast.title")} subtitle={t("forecast.subtitle")} />
+      <AppHeader title={t("forecast.title")} />
       <section className="flex-1 space-y-4 px-4 pb-28">
         {error ? <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div> : null}
         <div className="flex gap-2 overflow-x-auto pb-1">
@@ -82,6 +82,21 @@ function ForecastCard({ item, locale }: { item: ForecastItem; locale: string }) 
       </div>
       {item.summary ? <p className="mt-3 text-sm text-[#34423a]">{item.summary}</p> : null}
       {item.agency ? <p className="mt-2 text-sm font-semibold text-moss">{item.agency}</p> : null}
+      <div className="mt-4 grid gap-2">
+        <InsightRow icon={Files} title={t("forecast.documents")} items={item.missing_documents} empty={t("forecast.noMissingDocuments")} />
+        <InsightRow icon={AlertTriangle} title={t("forecast.deadlines")} items={item.deadline_conflicts} empty={t("forecast.noDeadlineConflicts")} />
+        <div className="rounded-lg border border-[#dfe8e2] bg-[#fbfdfb] p-3">
+          <p className="inline-flex items-center gap-2 text-sm font-bold text-ink">
+            <Gauge className="h-4 w-4 text-moss" /> {t("forecast.capacity")}
+          </p>
+          <p className="mt-1 text-sm text-[#34423a]">
+            {t("forecast.capacitySummary")
+              .replace("{count}", String(item.capacity?.weekly_action_count ?? 0))
+              .replace("{risk}", item.capacity?.risk || "low")}
+          </p>
+          {item.capacity?.note ? <p className="mt-1 text-xs text-[#66726a]">{item.capacity.note}</p> : null}
+        </div>
+      </div>
       <div className="mt-4 rounded-lg border border-[#dfe8e2] bg-[#f5f8f6] p-3">
         <p className="inline-flex items-center gap-2 text-sm font-bold text-ink">
           <FileCheck className="h-4 w-4 text-moss" /> {t("forecast.timeline")}
@@ -118,6 +133,38 @@ function ForecastCard({ item, locale }: { item: ForecastItem; locale: string }) 
         ) : null}
       </div>
     </article>
+  );
+}
+
+function InsightRow({
+  icon: Icon,
+  title,
+  items,
+  empty
+}: {
+  icon: typeof Files;
+  title: string;
+  items: string[];
+  empty: string;
+}) {
+  return (
+    <div className="rounded-lg border border-[#dfe8e2] bg-[#fbfdfb] p-3">
+      <p className="inline-flex items-center gap-2 text-sm font-bold text-ink">
+        <Icon className="h-4 w-4 text-moss" /> {title}
+      </p>
+      {items.length > 0 ? (
+        <ul className="mt-2 space-y-1 text-sm text-[#34423a]">
+          {items.slice(0, 4).map((item) => (
+            <li className="flex gap-2" key={item}>
+              <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-moss" />
+              <span>{item}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-1 text-sm text-[#66726a]">{empty}</p>
+      )}
+    </div>
   );
 }
 

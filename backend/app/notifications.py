@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from .models import GraphSubset
+from .models import GraphSubset, ReasoningLog
 
 
-def build_notifications(graph: GraphSubset) -> list[dict]:
+def build_notifications(graph: GraphSubset, logs: list[ReasoningLog] | None = None) -> list[dict]:
     nodes_by_id = {node.id: node for node in graph.nodes}
     items: list[dict] = []
 
@@ -65,6 +65,23 @@ def build_notifications(graph: GraphSubset) -> list[dict]:
                 "source_node_id": str(target.id),
                 "node_status": target.status,
                 "occurred_at": target.payload.get("start_at"),
+            }
+        )
+
+    for log in logs or []:
+        if not log.trigger.startswith("scheduled_review"):
+            continue
+        items.append(
+            {
+                "id": f"review-log:{log.id}",
+                "kind": "system",
+                "title": "Care plan reviewed",
+                "body": log.conclusion or "Care plan was rechecked against records, pending actions, and caregiver feedback.",
+                "created_at": log.created_at.isoformat(),
+                "href": "/notifications",
+                "source_node_id": None,
+                "node_status": None,
+                "occurred_at": log.created_at.isoformat(),
             }
         )
 

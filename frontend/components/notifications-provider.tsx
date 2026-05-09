@@ -49,6 +49,10 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   const [preferences, setPreferences] = useState<AppPreferences>({ criticalAlerts: true, notificationBadges: true });
   const [hydrated, setHydrated] = useState(false);
   const initialFetchDone = useRef(false);
+  const dismissedRef = useRef(dismissed);
+  const seenRef = useRef(seen);
+  const preferencesRef = useRef(preferences);
+  const storageTimer = useRef<number | null>(null);
 
   useEffect(() => {
     try {
@@ -94,8 +98,24 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     if (!hydrated) {
       return;
     }
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ dismissed, seen }));
+    dismissedRef.current = dismissed;
+    seenRef.current = seen;
+    if (storageTimer.current) {
+      window.clearTimeout(storageTimer.current);
+    }
+    storageTimer.current = window.setTimeout(() => {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ dismissed: dismissedRef.current, seen: seenRef.current }));
+    }, 100);
+    return () => {
+      if (storageTimer.current) {
+        window.clearTimeout(storageTimer.current);
+      }
+    };
   }, [dismissed, hydrated, seen]);
+
+  useEffect(() => {
+    preferencesRef.current = preferences;
+  }, [preferences]);
 
   const removeToast = useCallback((id: string) => {
     setToasts((current) => current.filter((toast) => toast.id !== id));
@@ -126,12 +146,12 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     const items = await api.notifications();
     setNotifications(items);
 
-    const visible = items.filter((item) => !dismissed[item.id]);
-    const newItems = visible.filter((item) => !seen[item.id]);
+    const visible = items.filter((item) => !dismissedRef.current[item.id]);
+    const newItems = visible.filter((item) => !seenRef.current[item.id]);
     if (newItems.length > 0) {
       if (!options?.suppressToasts) {
         const shouldToast = initialFetchDone.current ? newItems : newItems.slice(0, 2);
-        shouldToast.filter((item) => preferences.criticalAlerts || item.kind !== "review").forEach(pushToast);
+        shouldToast.filter((item) => preferencesRef.current.criticalAlerts || item.kind !== "review").forEach(pushToast);
       }
       const timestamp = new Date().toISOString();
       setSeen((current) => {
@@ -139,11 +159,12 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
         for (const item of newItems) {
           next[item.id] = timestamp;
         }
+        seenRef.current = next;
         return next;
       });
     }
     initialFetchDone.current = true;
-  }, [dismissed, preferences.criticalAlerts, pushToast, seen]);
+  }, [pushToast]);
 
   useEffect(() => {
     if (!hydrated) {
@@ -159,13 +180,18 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   }, [hydrated, pushToast, refreshNotifications, t]);
 
   const dismissNotification = useCallback((id: string) => {
-    setDismissed((current) => ({ ...current, [id]: new Date().toISOString() }));
+    setDismissed((current) => {
+      const next = { ...current, [id]: new Date().toISOString() };
+      dismissedRef.current = next;
+      return next;
+    });
   }, []);
 
   const restoreNotification = useCallback((id: string) => {
     setDismissed((current) => {
       const next = { ...current };
       delete next[id];
+      dismissedRef.current = next;
       return next;
     });
   }, []);
@@ -259,39 +285,103 @@ export function NotificationBell() {
 }
 
 function ToastViewport({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: string) => void }) {
-  const { t } = useI18n();
   if (toasts.length === 0) {
     return null;
   }
 
   return (
-    <div className="fixed inset-x-0 top-3 z-50 mx-auto flex w-full max-w-[430px] flex-col gap-2 px-3">
+    <div className="fixed left-1/2 top-3 z-50 flex w-[calc(100vw-1.5rem)] max-w-[406px] -translate-x-1/2 flex-col gap-2">
       {toasts.map((toast) => (
-        <div className="rounded-xl border border-[#dfe8e2] bg-white p-3 shadow-lg" key={toast.id} role="status">
-          <div className="flex items-start gap-3">
-            <span
-              className={clsx(
-                "mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
-                toast.kind === "dismissed" ? "bg-[#f4e5df] text-[#8d3d29]" : "bg-mint text-moss"
-              )}
-            >
-              {toast.kind === "dismissed" ? <X className="h-4 w-4" /> : <Check className="h-4 w-4" />}
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-bold text-ink">{toast.title}</p>
-              <p className="mt-0.5 line-clamp-2 text-xs text-[#536159]">{toast.body}</p>
-              {toast.href ? (
-                <Link href={toast.href} className="mt-2 inline-flex text-xs font-semibold text-moss" onClick={() => onDismiss(toast.id)}>
-                  {t("notifications.view")}
-                </Link>
-              ) : null}
-            </div>
-            <button className="rounded-full p-1 text-[#6c756f] hover:bg-[#eef3ef]" onClick={() => onDismiss(toast.id)} aria-label={t("notifications.dismiss")}>
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
+        <SwipeToast toast={toast} onDismiss={onDismiss} key={toast.id} />
       ))}
+    </div>
+  );
+}
+
+function SwipeToast({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string) => void }) {
+  const { t } = useI18n();
+  const toastRef = useRef<HTMLDivElement | null>(null);
+  const startX = useRef<number | null>(null);
+  const dragX = useRef(0);
+  const frame = useRef<number | null>(null);
+
+  function applyDrag(nextDragX: number) {
+    dragX.current = nextDragX;
+    if (frame.current) {
+      return;
+    }
+    frame.current = window.requestAnimationFrame(() => {
+      frame.current = null;
+      const element = toastRef.current;
+      if (!element) {
+        return;
+      }
+      const offset = dragX.current;
+      element.style.opacity = String(Math.max(0.45, 1 - Math.abs(offset) / 220));
+      element.style.transform = `translateX(${offset}px) rotate(${offset / 28}deg)`;
+    });
+  }
+
+  function resetDrag() {
+    dragX.current = 0;
+    const element = toastRef.current;
+    if (!element) {
+      return;
+    }
+    element.style.opacity = "1";
+    element.style.transform = "translateX(0) rotate(0deg)";
+  }
+
+  return (
+    <div
+      ref={toastRef}
+      className="rounded-xl border border-[#dfe8e2] bg-white p-3 shadow-lg transition-transform"
+      onPointerDown={(event) => {
+        startX.current = event.clientX;
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }}
+      onPointerMove={(event) => {
+        if (startX.current === null) {
+          return;
+        }
+        applyDrag(event.clientX - startX.current);
+      }}
+      onPointerUp={() => {
+        if (Math.abs(dragX.current) > 96) {
+          onDismiss(toast.id);
+        }
+        resetDrag();
+        startX.current = null;
+      }}
+      onPointerCancel={() => {
+        resetDrag();
+        startX.current = null;
+      }}
+      role="status"
+      style={{ touchAction: "pan-y" }}
+    >
+      <div className="flex items-start gap-3">
+        <span
+          className={clsx(
+            "mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
+            toast.kind === "dismissed" ? "bg-[#f4e5df] text-[#8d3d29]" : "bg-mint text-moss"
+          )}
+        >
+          {toast.kind === "dismissed" ? <X className="h-4 w-4" /> : <Check className="h-4 w-4" />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold text-ink">{toast.title}</p>
+          <p className="mt-0.5 line-clamp-2 text-xs text-[#536159]">{toast.body}</p>
+          {toast.href ? (
+            <Link href={toast.href} className="mt-2 inline-flex text-xs font-semibold text-moss" onClick={() => onDismiss(toast.id)}>
+              {t("notifications.view")}
+            </Link>
+          ) : null}
+        </div>
+        <button className="rounded-full p-1 text-[#6c756f] hover:bg-[#eef3ef]" onClick={() => onDismiss(toast.id)} aria-label={t("notifications.dismiss")}>
+          <X className="h-4 w-4" />
+        </button>
+      </div>
     </div>
   );
 }

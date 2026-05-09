@@ -18,6 +18,7 @@ type AppPreferences = {
   criticalAlerts: boolean;
   notificationBadges: boolean;
   offlineCache: boolean;
+  breakBufferMinutes: number;
 };
 
 const PREFERENCES_KEY = "caregiver-companion-preferences";
@@ -25,7 +26,8 @@ const CARE_REVIEW_CACHE_KEY = "caregiver-companion-care-review";
 const defaultPreferences: AppPreferences = {
   criticalAlerts: true,
   notificationBadges: true,
-  offlineCache: true
+  offlineCache: true,
+  breakBufferMinutes: 10
 };
 
 const themeOptions = [
@@ -112,6 +114,26 @@ export default function SettingsPage() {
       await refreshNotifications({ suppressToasts: true });
       setMessage(t("settings.rebuilt"));
       notify({ title: t("notifications.carePlanRebuilt"), body: t("settings.rebuilt"), kind: "system", href: "/" });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function refreshCareReview() {
+    setBusy("review");
+    setMessage(null);
+    setError(null);
+    try {
+      const result = await api.carePlanRereason();
+      setReview(result.review);
+      if (preferences.offlineCache) {
+        window.localStorage.setItem(CARE_REVIEW_CACHE_KEY, JSON.stringify(result.review));
+      }
+      await refreshNotifications({ suppressToasts: true });
+      setMessage(result.conclusion);
+      notify({ title: t("settings.refreshReview"), body: result.conclusion, kind: "system", href: "/notifications" });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -228,6 +250,26 @@ export default function SettingsPage() {
               label={t("settings.offlineCache")}
               onChange={() => togglePreference("offlineCache")}
             />
+            <label className="flex items-center justify-between gap-3 p-3">
+              <span>
+                <span className="block text-sm font-bold text-ink">{t("settings.breakBuffer")}</span>
+                <span className="mt-0.5 block text-xs text-[#66726a]">{t("settings.breakBufferDescription")}</span>
+              </span>
+              <input
+                className="h-10 w-20 rounded-lg border border-[#cbd8cf] bg-white px-3 text-right text-sm font-bold text-ink"
+                max={60}
+                min={0}
+                onChange={(event) =>
+                  setPreferences((current) => ({
+                    ...current,
+                    breakBufferMinutes: Math.max(0, Math.min(60, Number(event.target.value) || 0))
+                  }))
+                }
+                step={5}
+                type="number"
+                value={preferences.breakBufferMinutes}
+              />
+            </label>
           </div>
         </section>
 
@@ -260,7 +302,7 @@ export default function SettingsPage() {
               </div>
             ))}
           </div>
-          <Button className="mt-3 w-full" variant="secondary" onClick={load} disabled={Boolean(busy)}>
+          <Button className="mt-3 w-full" variant="secondary" onClick={refreshCareReview} disabled={Boolean(busy)}>
             <RefreshCw className="h-4 w-4" /> {t("settings.refreshReview")}
           </Button>
         </section>

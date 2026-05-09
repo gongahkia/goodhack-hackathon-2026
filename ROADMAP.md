@@ -1,9 +1,9 @@
 # Caregiver Companion — Product Roadmap
 
-**Project codename:** TBD
+**Project name:** Caregiver Companion
 **Context:** Build for Good Hackathon, Singapore
 **Primary user:** Family caregivers of elderly Singaporeans (adult children caring for aging parents)
-**Secondary user (v2+):** Domestic helpers acting as primary caregivers
+**Secondary user (v3+):** Domestic helpers acting as primary caregivers
 **Tertiary user (v3+):** The elderly themselves
 
 ---
@@ -16,16 +16,19 @@ The North Star metric is **caregiver-hours saved per week** while maintaining or
 
 ---
 
-## Architecture Overview (target end-state)
+## Architecture Overview
 
-- **Knowledge graph** as the data spine: nodes are NEHR records, inferred conditions, scheduled actions, recommended resources, grant applications, caregiver feedback. Edges encode `derived_from`, `triggers`, `recommends`, `applies_to`, `dismissed_by`, `approved_by`.
-- **Agent layer** with tool use: read NEHR, search web (Exa / Tinyfish), search curated grant database, find educational resources, create calendar events with mandatory provenance, log reasoning steps.
-- **Audit layer**: every node and edge has a reasoning trace; every calendar event back-traces to source records; every source record forward-traces to the actions it spawned.
-- **Human-in-the-loop layer**: caregiver approval, dismissal, edit signals feed back into a memory store that conditions future reasoning.
+- **Knowledge graph data spine:** `nodes`, `edges`, `reasoning_logs`, and raw NEHR-style records. Nodes represent `nehr_record`, `inferred_condition`, `scheduled_action`, `recommended_resource`, `grant_opportunity`, and `caregiver_feedback`. Edges encode `derived_from`, `triggers`, `recommends`, `applies_to`, and `feedback_on`.
+- **OpenAI reasoning layer:** OpenAI Responses API function-tool loop reads records, checks graph context, searches curated Singapore grants/resources, reads condition trajectories, creates graph nodes, and logs tool calls/results.
+- **Provenance guardrail:** every `scheduled_action` must be linked by a `derived_from` edge to a source `nehr_record` or `inferred_condition`; ungrounded care actions are rejected.
+- **Care intelligence layer:** caregiver approvals, dismissals, edits, usefulness scores, and steering signals become graph feedback that conditions future low-risk recommendations while preserving high-priority medication, falls-risk, appointment, and grant-deadline actions.
+- **Singapore resource layer:** curated condition trajectories, AIC/MOH/SG Enable/CHAS-style grant data, verified resources, and allowlisted live search are used to keep recommendations local, relevant, and auditable.
+- **User experience layer:** mobile-first Next.js app with calendar, agenda, forecast, review, records, event detail, reasoning trail, settings, notifications, multilingual labels, calendar export, and subscription feed.
+- **Deployment path:** Next.js frontend, FastAPI backend, Supabase Postgres for production persistence, with in-memory storage and scripted reasoning fallback for local demos when external services are absent.
 
 ---
 
-## Version 1 — Hackathon MVP (2 days)
+## Version 1 — Hackathon MVP (completed)
 
 **Goal:** A demo-perfect, single-patient flow that proves the bidirectional traceability + preemptive reasoning concept.
 
@@ -45,7 +48,7 @@ The North Star metric is **caregiver-hours saved per week** while maintaining or
 - **Human-in-the-loop v1**: AI-generated tasks marked with "Pending Review" badge. Caregiver can Approve / Dismiss / Edit. Dismiss/edit feed into `reasoning_logs` for later memory use.
 - Audit log viewer showing the agent's chain of thought for any decision.
 
-### Out of scope (deliberately)
+### Out of scope for v1 (deliberately)
 
 - React Native / native mobile app → use mobile-responsive Next.js instead
 - Real NEHR integration (assumed API)
@@ -56,14 +59,14 @@ The North Star metric is **caregiver-hours saved per week** while maintaining or
 - Admin / clinician review interface
 - Real grant API submissions (UI shows "one-tap apply" but links out to real stat board pages)
 
-### Stack
+### Implemented stack
 
 - **Frontend:** Next.js 14, Tailwind, shadcn/ui, FullCalendar.js, mobile-responsive layout. Deployed to Vercel.
 - **Backend:** Python FastAPI, single service.
-- **Agent:** Anthropic SDK, Claude Opus 4.7, native tool use loop.
+- **Agent:** OpenAI Responses API with function-tool loop, plus scripted fallback for deterministic local demos.
 - **Storage:** Supabase Postgres.
 - **Search:** Exa (primary) + Tinyfish (fallback).
-- **LLM credits:** OpenAI credits available; primary reasoner remains Claude Opus 4.7 for tool use quality.
+- **LLM provider:** OpenAI.
 
 ### Demo flow (3-minute pitch)
 
@@ -77,10 +80,11 @@ The North Star metric is **caregiver-hours saved per week** while maintaining or
 
 ---
 
-## Version 2 — Post-hackathon, ~4 weeks
+## Version 2 — Current hardening, ~4 weeks
 
 **Goal:** Move from "demo-magic" to "actually usable for one real caregiver-patient pair."
 
+- **Product naming stays Caregiver Companion** for the current hackathon and roadmap cycle.
 - **True chain-of-thought reasoning surfaced to the user**: not just logged, but rendered as a readable narrative ("I noticed X in last week's record, which combined with Y from three months ago suggests Z…"). v1 logs the chain; v2 makes it a first-class UI artifact.
 - **Live web search (Exa) for educational content and grants** with safety guardrails: source allowlist (gov.sg, healthhub.sg, AIC, recognized clinical bodies), recency checks, and a secondary LLM verification pass before content is shown.
 - **Memory layer**: caregiver Approve/Dismiss/Edit signals now condition future reasoning. If a caregiver consistently dismisses dietary suggestions, the agent down-weights them. Stored as structured preferences + raw event log.
@@ -89,7 +93,7 @@ The North Star metric is **caregiver-hours saved per week** while maintaining or
 - **Agenda intelligence upgrades**: learn caregiver preferences for task ordering inside flexible blocks, protect rest blocks unless a task is clinically urgent, and explain why any task must happen at a specific time instead of being movable within the block.
 - **Forecast intelligence upgrades**: keep grant, hospice, equipment, respite-care, and home-modification timelines updated as records change; flag missing documents early; and surface conflicts between forecast deadlines and the caregiver's weekly capacity.
 - **Longitudinal appointment prep**: appointment talking points become a longitudinal brief that tracks recurring concerns, previously asked questions, unresolved clinician advice, and future risks that should be revisited at the next consultation.
-- **Caregiver review intelligence**: keep the existing caregiver Review tab as the main human-in-the-loop surface. Caregivers can approve/dismiss actions, rate usefulness, leave notes, and steer future suggestions toward "more", "less", or "simpler" recommendations. These signals feed memory and future reasoning.
+- **Caregiver review intelligence**: expose human-in-the-loop decisions from notifications, action detail cards, and review surfaces rather than requiring a dedicated bottom-tab destination. Caregivers can approve/dismiss actions, rate usefulness, leave notes, and steer future suggestions toward "more", "less", or "simpler" recommendations. These signals feed memory and future reasoning.
 - **Proper evaluation harness**:
   - Golden test set of synthetic patient records with expected schedules.
   - Per-decision eval: was the provenance correct? Was the reasoning sound? Was the action appropriate?
@@ -98,20 +102,30 @@ The North Star metric is **caregiver-hours saved per week** while maintaining or
 
 ---
 
-## Version 3 — ~3 months
+## Version 3 — Multi-user and integration expansion, ~3 months
 
 **Goal:** Scale to multiple caregivers, broaden languages, deepen integrations.
 
 - **Continuous agentic monitoring**: agent watches for external triggers — new grants announced, updated clinical guidelines, seasonal factors (haze → respiratory patients, dengue clusters, flu season for elderly).
+- **Configurable protected rest windows**: caregivers can define preferred rest blocks, work constraints, helper availability, and household routines. The agenda should make hidden rest opportunities explicit, label them as protected, and treat rest as a first-class care-plan constraint rather than an empty gap.
+- **Fixed vs flexible task semantics**: every scheduled action should declare whether it is fixed-time, flexible-within-block, deadline-based, or movable. Medication, appointments, and grant deadlines should stay fixed unless edited; therapy, education, documentation, and low-risk reminders should be movable within caregiver-approved windows.
+- **Rest-aware agenda validation**: the planner should flag low-risk flexible tasks that land inside protected rest, suggest alternate morning/evening blocks, and explain when an action must interrupt rest because it is clinically or financially urgent.
+- **Caregiver capacity signals**: blocks should show load and overload state, including number of tasks, estimated effort, urgency mix, and whether the caregiver has a realistic rest opportunity that day.
 - **Sea-Lion multilingual + voice**: voice readout of schedule and prognosis in English, Mandarin, Malay, Tamil, Bahasa Indonesia, Tagalog. Critical for elderly direct use and helper accessibility.
 - **Domestic helper user mode**: distinct UX, language-first, with appropriate scoping of what they can approve vs. what escalates to family.
 - **Real grant integration**: where APIs exist (or partnerships can be formed with AIC / SG Enable / town councils), move from handoff links to true one-tap apply.
 - **Caregiver-to-caregiver knowledge sharing**: anonymized, opt-in patterns (e.g., "other caregivers of dementia patients found this resource useful").
-- **Multiplayer and caregiver assignment**: So multiple families can 
+- **Multiplayer and caregiver assignment**: multiple family members can share a patient care plan, assign tasks, track ownership, and see which caregiver approved or dismissed each recommendation.
+- **Evaluation harness expansion**: broaden the current eval from provenance smoke tests into scenario-level quality gates across Parkinson's, dementia, post-stroke recovery, COPD, and congestive heart failure. Each fixture should define source records, expected action types, required actions, forbidden actions, required source links, expected grant/resource IDs, and acceptable timing windows.
+- **Per-decision scoring**: evaluate every generated care action for provenance correctness, clinical plausibility, financial relevance, timing appropriateness, caregiver burden, reasoning presence, source specificity, and safe-to-show status.
+- **Negative safety tests**: verify that the agent does not invent future needs for unknown trajectories, does not surface grants without eligibility evidence, rejects non-allowlisted resources, and applies caregiver dismissal memory only to low-risk suggestions without suppressing medication, falls-risk, appointment, or grant-deadline actions.
+- **Evaluator architecture**: keep the live care-plan generator as a single OpenAI reasoning loop, then add deterministic validators and an optional OpenAI evaluator/critic for offline, CI, or nightly QA. Multi-agent critique should support evaluation and review, not make the live MVP flow harder to debug.
 
 ---
 
-## Version 4+ — 6–12 months
+## Version 4 — Full MVP target, 6–12 months
+
+**Goal:** Reach the eventual full MVP: a partner-ready care planning product that can support real integrations, real caregiver workflows, and a credible path toward deployment beyond synthetic demo data.
 
 - **Real NEHR integration** via Synapxe partnership.
 - **B2B2C distribution** through polyclinics, hospital discharge planning teams, and AIC.
@@ -120,6 +134,8 @@ The North Star metric is **caregiver-hours saved per week** while maintaining or
   - Reusable pieces for Expo: API contracts in `frontend/lib/api.ts`, data types in `frontend/lib/types.ts`, i18n strings in `frontend/lib/i18n.tsx` after adapting storage/provider concerns, and the product flow/screen structure.
   - Expo replacement work: Next.js routing/pages, DOM/browser APIs such as `window.print`, file inputs, iframe embeds, and `localStorage`, FullCalendar's web component, Tailwind/shadcn web styling, HTML anchors/forms, and web-only attachment handling.
   - Recommended path: deploy the MVP as web first; if native mobile is needed, build a dedicated `mobile/` Expo app against the existing FastAPI backend rather than converting the Next.js frontend in place.
+- **Adaptive rest-preserving scheduler**: move from static time blocks to a scheduling engine that learns caregiver capacity, protects rest by default, reschedules movable tasks around fixed commitments, and records why any rest interruption was necessary.
+- **Caregiver burden evaluation**: include rest protection, block overload, avoidable interruptions, and task-movement quality in the evaluation harness so the system is measured not only on clinical correctness but also on whether it reduces mental clutter.
 - **Expansion to chronic disease management** beyond elderly (diabetes, oncology survivorship, mental health).
 - **Regional expansion** to Malaysia, Indonesia, Thailand — Sea-Lion's multilingual capability becomes a strategic moat.
 - **Predictive health insights** at the population level (privacy-preserving, opt-in) — caregiving signal is a uniquely undertapped dataset.
@@ -148,6 +164,5 @@ The North Star metric is **caregiver-hours saved per week** while maintaining or
 
 ## Open Questions
 
-- Project name.
 - Whether to pursue Synapxe / AIC partnerships pre- or post-hackathon win.
 - Whether monetization is B2C (caregiver subscription), B2B2C (hospital / polyclinic licensing), or grant-funded (MOH, Tote Board).

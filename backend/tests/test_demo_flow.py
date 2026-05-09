@@ -7,6 +7,7 @@ import pytest
 from app.agent.loop import run_agent_for_trigger
 from app.config import Settings
 from app.demo import PATIENT_ID, ingest_trigger_records, seed_baseline
+from app.eval import evaluate_care_plan
 from app.graph_queries import backtrace_sources, forward_actions
 from app.notifications import build_notifications
 from app.store import MemoryGraphStore
@@ -226,3 +227,20 @@ async def test_v2_appointment_prep_and_forecast():
     smf = next(item for item in forecast if item["title"] == "Apply for Seniors' Mobility and Enabling Fund")
     assert smf["category"] == "grant"
     assert any(step["label"] == "Eligibility evidence" for step in smf["timeline"])
+
+
+@pytest.mark.asyncio
+async def test_v2_eval_harness_checks_each_decision():
+    store = MemoryGraphStore()
+    await store.init()
+    await seed_baseline(store)
+    trigger = await ingest_trigger_records(store)
+    await run_agent_for_trigger(store, Settings(demo_agent_mode="scripted"), PATIENT_ID, trigger["node_ids"][0])
+
+    result = evaluate_care_plan(await store.graph_subset(PATIENT_ID), await store.list_reasoning_logs())
+
+    assert result["passed"]
+    assert result["action_count"] == 4
+    assert result["ungrounded_action_count"] == 0
+    assert all(decision["provenance_correct"] for decision in result["decision_evals"])
+    assert all(decision["reasoning_present"] for decision in result["decision_evals"])

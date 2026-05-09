@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { BellOff, ExternalLink, RotateCcw, X } from "lucide-react";
+import { BellOff, ExternalLink, RotateCcw, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { clsx } from "clsx";
 import { AppHeader } from "@/components/app-header";
 import { BottomNav } from "@/components/bottom-nav";
 import { Button } from "@/components/ui/button";
+import { api } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import type { AppNotification } from "@/lib/types";
@@ -16,14 +17,34 @@ type NotificationTab = "active" | "dismissed";
 
 export default function NotificationsPage() {
   const { t, dateLocale } = useI18n();
-  const { activeNotifications, dismissedNotifications, dismissNotification, restoreNotification } = useNotifications();
+  const { activeNotifications, dismissedNotifications, dismissNotification, restoreNotification, refreshNotifications } = useNotifications();
   const [tab, setTab] = useState<NotificationTab>("active");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const items = tab === "active" ? activeNotifications : dismissedNotifications;
+
+  async function setCareActionStatus(notification: AppNotification, status: "approved" | "dismissed") {
+    if (!notification.source_node_id) {
+      return;
+    }
+    setBusyId(notification.id);
+    setError(null);
+    try {
+      await api.status(notification.source_node_id, status);
+      dismissNotification(notification.id);
+      await refreshNotifications({ suppressToasts: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   return (
     <>
       <AppHeader title={t("notifications.title")} subtitle={t("notifications.subtitle")} />
       <section className="flex-1 space-y-4 px-4 pb-4">
+        {error ? <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div> : null}
         <div className="grid grid-cols-2 rounded-xl border border-[#dfe8e2] bg-white p-1">
           {(["active", "dismissed"] as NotificationTab[]).map((item) => (
             <button
@@ -53,6 +74,9 @@ export default function NotificationsPage() {
               dateLocale={dateLocale}
               onDismiss={() => dismissNotification(notification.id)}
               onRestore={() => restoreNotification(notification.id)}
+              onApprove={() => setCareActionStatus(notification, "approved")}
+              onRejectAction={() => setCareActionStatus(notification, "dismissed")}
+              busy={busyId === notification.id}
               dismissed={tab === "dismissed"}
             />
           ))}
@@ -68,15 +92,22 @@ function NotificationCard({
   dateLocale,
   dismissed,
   onDismiss,
-  onRestore
+  onRestore,
+  onApprove,
+  onRejectAction,
+  busy
 }: {
   notification: AppNotification;
   dateLocale: string;
   dismissed: boolean;
   onDismiss: () => void;
   onRestore: () => void;
+  onApprove: () => void;
+  onRejectAction: () => void;
+  busy: boolean;
 }) {
   const { t } = useI18n();
+  const canReview = !dismissed && notification.kind === "review" && Boolean(notification.source_node_id);
   return (
     <article className={clsx("rounded-xl border bg-white p-4", dismissed ? "border-[#e0e3e1] opacity-80" : "border-[#dfe8e2]")}>
       <div className="flex items-start justify-between gap-3">
@@ -96,6 +127,16 @@ function NotificationCard({
           <Link className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-moss px-3 py-2 text-sm font-semibold text-white" href={notification.href}>
             {t("notifications.view")} <ExternalLink className="h-4 w-4" />
           </Link>
+        ) : null}
+        {canReview ? (
+          <>
+            <Button onClick={onApprove} disabled={busy}>
+              <ThumbsUp className="h-4 w-4" /> {t("notifications.approveAction")}
+            </Button>
+            <Button variant="danger" onClick={onRejectAction} disabled={busy}>
+              <ThumbsDown className="h-4 w-4" /> {t("notifications.dismissAction")}
+            </Button>
+          </>
         ) : null}
         {dismissed ? (
           <Button variant="secondary" onClick={onRestore}>

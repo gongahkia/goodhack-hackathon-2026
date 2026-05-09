@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from contextlib import suppress
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Response
@@ -8,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .agent.loop import run_agent_for_trigger
 from .config import get_settings
 from .demo import PATIENT, PATIENT_ID, ingest_trigger_records, seed_baseline
+from .eval import evaluate_care_plan
 from .graph_queries import backtrace_sources, forward_actions
 from .models import NodeEdit, StatusUpdate
 from .notifications import build_notifications
@@ -46,6 +49,17 @@ async def startup() -> None:
     existing_nodes = await store.list_nodes(PATIENT_ID)
     if not existing_nodes:
         await rebuild_care_plan()
+    if settings.scheduled_review_enabled:
+        app.state.scheduled_review_task = asyncio.create_task(scheduled_review_loop())
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    task = getattr(app.state, "scheduled_review_task", None)
+    if task:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 @app.get("/health")
@@ -70,6 +84,34 @@ async def rebuild_care_plan() -> dict:
     trigger = await ingest_trigger_records(store)
     agent_result = await run_agent_for_trigger(store, settings, PATIENT_ID, trigger["node_ids"][0])
     return {**baseline, "trigger": trigger, "agent": agent_result}
+
+
+async def scheduled_review_loop() -> None:
+    while True:
+        await asyncio.sleep(max(60, settings.scheduled_review_interval_seconds))
+        with suppress(Exception):
+            await run_scheduled_review()
+
+
+async def run_scheduled_review() -> dict:
+    graph = await store.graph_subset(PATIENT_ID)
+    logs = await store.list_reasoning_logs()
+    review = build_care_plan_review(graph, logs)
+    log = await store.create_reasoning_log("scheduled_review")
+    conclusion = " ".join(review["narrative"][:3])
+    await store.append_reasoning_step(
+        log.id,
+        {
+            "kind": "care_plan_review",
+            "record_count": review["record_count"],
+            "condition_count": review["condition_count"],
+            "pending_review_count": review["pending_review_count"],
+            "upcoming_30_day_count": review["upcoming_30_day_count"],
+            "memory_instructions": review["memory_instructions"],
+        },
+    )
+    await store.finish_reasoning_log(log.id, conclusion)
+    return {"reasoning_log_id": str(log.id), "conclusion": conclusion, "review": review}
 
 
 @app.get("/patient/summary")
@@ -162,6 +204,11 @@ async def care_plan_review() -> dict:
     return build_care_plan_review(graph, logs)
 
 
+@app.post("/care-plan/rereason")
+async def care_plan_rereason() -> dict:
+    return await run_scheduled_review()
+
+
 @app.get("/forecast")
 async def forecast() -> list[dict]:
     return build_forecast(await store.graph_subset(PATIENT_ID))
@@ -181,7 +228,8 @@ async def grant_search(condition: str) -> list[dict]:
 @app.get("/notifications")
 async def notifications() -> list[dict]:
     graph = await store.graph_subset(PATIENT_ID)
-    return build_notifications(graph)
+    logs = await store.list_reasoning_logs()
+    return build_notifications(graph, logs)
 
 
 @app.patch("/nodes/{node_id}/status")
@@ -232,3 +280,8 @@ async def audit_detail(log_id: UUID) -> dict:
     if not log:
         raise HTTPException(404, "Reasoning log not found")
     return log.model_dump(mode="json")
+
+
+@app.get("/eval/care-plan")
+async def care_plan_eval() -> dict:
+    return evaluate_care_plan(await store.graph_subset(PATIENT_ID), await store.list_reasoning_logs())

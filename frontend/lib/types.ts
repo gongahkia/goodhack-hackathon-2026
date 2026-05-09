@@ -51,6 +51,10 @@ export type AppointmentPrep = {
   therapy_mobility_notes: string[];
   questions_for_clinician: string[];
   long_term_concerns: string[];
+  recurring_concerns: string[];
+  previous_questions: string[];
+  unresolved_advice: string[];
+  revisit_next_time: string[];
   evidence: EvidenceSummary[];
 };
 
@@ -69,8 +73,11 @@ export type VerifiedContent = {
   source: string;
   url?: string | null;
   snippet: string;
+  published_at?: string | null;
   retrieved_at: string;
   verification_status: "safe_to_show" | "needs_review" | "reject";
+  recency_status?: "current" | "aging" | "old" | "unknown" | string;
+  secondary_verification?: "openai" | "not_run" | "failed_open" | "not_returned" | string;
   reason: string;
 };
 
@@ -95,6 +102,9 @@ export type ForecastItem = {
   summary?: string | null;
   agency?: string | null;
   apply_url?: string | null;
+  missing_documents: string[];
+  deadline_conflicts: string[];
+  capacity: { weekly_action_count: number; risk: "low" | "medium" | "high" | string; note: string };
   timeline: Array<{ label: string; detail: string }>;
   evidence: EvidenceSummary[];
 };

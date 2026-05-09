@@ -508,6 +508,10 @@ function AppointmentPrepPanel({ prep }: { prep: AppointmentPrep }) {
         <PrepList title={t("event.prepMobility")} items={prep.therapy_mobility_notes} />
         <PrepList title={t("event.prepQuestions")} items={prep.questions_for_clinician} />
         <PrepList title={t("event.prepLongTerm")} items={prep.long_term_concerns} />
+        <PrepList title={t("event.prepRecurring")} items={prep.recurring_concerns || []} />
+        <PrepList title={t("event.prepPreviousQuestions")} items={prep.previous_questions || []} />
+        <PrepList title={t("event.prepUnresolved")} items={prep.unresolved_advice || []} />
+        <PrepList title={t("event.prepRevisit")} items={prep.revisit_next_time || []} />
       </div>
       {prep.evidence.length > 0 ? (
         <div className="mt-3 flex flex-wrap gap-2">

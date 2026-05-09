@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -7,6 +8,7 @@ from urllib.parse import urlparse
 from uuid import UUID
 
 import httpx
+from openai import AsyncOpenAI
 
 from .config import Settings
 from .data import educational_resources, grants_database
@@ -184,18 +186,16 @@ def build_care_plan_review(graph: GraphSubset, logs: list[ReasoningLog]) -> dict
 
 async def search_verified_resources(query: str, settings: Settings, allowlist: list[str] | None = None) -> list[dict[str, Any]]:
     curated = _curated_resource_matches(query)
-    if not settings.exa_api_key:
-        return curated
-    live = await _exa_search(query, settings.exa_api_key, allowlist or DEFAULT_ALLOWED_DOMAINS)
-    return _dedupe_verified_results([*live, *curated])[:5]
+    domains = allowlist or DEFAULT_ALLOWED_DOMAINS
+    live = await _live_search(query, settings, domains)
+    return _dedupe_verified_results([*curated, *live])[:5]
 
 
 async def search_verified_grants(query: str, settings: Settings, allowlist: list[str] | None = None) -> list[dict[str, Any]]:
     curated = _curated_grant_matches(query)
-    if not settings.exa_api_key:
-        return curated
-    live = await _exa_search(f"{query} Singapore caregiver senior grant", settings.exa_api_key, allowlist or DEFAULT_ALLOWED_DOMAINS)
-    return _dedupe_verified_results([*live, *curated])[:5]
+    domains = allowlist or DEFAULT_ALLOWED_DOMAINS
+    live = await _live_search(f"{query} Singapore caregiver senior grant", settings, domains)
+    return _dedupe_verified_results([*curated, *live])[:5]
 
 
 def event_reasoning_narrative(event: Node, graph: GraphSubset, log: ReasoningLog | None) -> list[str]:
@@ -239,6 +239,10 @@ def build_appointment_prep(event: Node, graph: GraphSubset) -> dict[str, Any] | 
     mobility_notes = ["Mention any near-falls, slower walking, tremor changes, or confidence changes"]
     questions = ["Ask what changes should trigger an earlier appointment", "Confirm next follow-up timing and who to contact if symptoms worsen"]
     long_term = ["Check whether any future equipment, therapy, or caregiver support planning should begin now"]
+    recurring_concerns = _recurring_care_concerns(graph, event)
+    previous_questions = _previous_clinician_questions(graph, event)
+    unresolved_advice = _unresolved_advice(graph, event)
+    revisit_next_time = ["Revisit any prior advice that has not turned into a scheduled care action yet"]
 
     if has_parkinsons:
         symptoms = ["Resting tremor changes", "Slowness or stiffness during daily activities", "Any freezing, shuffling, near-falls, or balance concerns"]
@@ -253,6 +257,11 @@ def build_appointment_prep(event: Node, graph: GraphSubset) -> dict[str, Any] | 
             "Discuss mobility aid readiness and whether an AIC SMF application may be needed later",
             "Ask when to reassess home safety, caregiver burden, and transport needs",
         ]
+        recurring_concerns = list(dict.fromkeys([*recurring_concerns, "Medication timing after meals", "Falls and gait confidence", "Home exercise adherence"]))
+        revisit_next_time = [
+            "Confirm whether medication timing is still appropriate after meals",
+            "Review whether mobility aid or home safety planning should move from forecast to action",
+        ]
 
     return {
         "appointment_id": str(event.id),
@@ -263,6 +272,10 @@ def build_appointment_prep(event: Node, graph: GraphSubset) -> dict[str, Any] | 
         "therapy_mobility_notes": mobility_notes,
         "questions_for_clinician": questions,
         "long_term_concerns": long_term,
+        "recurring_concerns": recurring_concerns[:5],
+        "previous_questions": previous_questions[:5],
+        "unresolved_advice": unresolved_advice[:5],
+        "revisit_next_time": revisit_next_time[:5],
         "evidence": [_source_summary(source) for source in sources],
     }
 
@@ -309,9 +322,13 @@ def _forecast_card(action: Node, graph: GraphSubset) -> dict[str, Any]:
     sources = backtrace_sources(action, graph.nodes, graph.edges)
     grant = _related_grant(action, graph)
     target_date = action.payload.get("start_at")
+    missing_documents = _missing_documents(category, action, grant)
+    deadline_conflicts = _deadline_conflicts(action, graph)
+    capacity = _capacity_signal(action, graph)
     timeline = [
         {"label": "Trigger", "detail": _first_source_title(sources) or "Care-plan trajectory identified a future need."},
         {"label": "Eligibility evidence", "detail": _eligibility_detail(grant, sources)},
+        {"label": "Documents needed", "detail": ", ".join(missing_documents[:4]) if missing_documents else "No missing document signals yet."},
         {"label": "Prep steps", "detail": _prep_detail(category)},
         {"label": "Application window", "detail": f"Start by {_human_datetime(target_date)}." if target_date else "Review at the forecast checkpoint."},
         {"label": "Follow-up", "detail": "Recheck status after submission and update the care plan with any approval outcome."},
@@ -325,8 +342,111 @@ def _forecast_card(action: Node, graph: GraphSubset) -> dict[str, Any]:
         "summary": description,
         "agency": action.payload.get("agency") or (grant.payload.get("agency") if grant else None),
         "apply_url": action.payload.get("apply_url") or action.payload.get("url") or (grant.payload.get("url") if grant else None),
+        "missing_documents": missing_documents,
+        "deadline_conflicts": deadline_conflicts,
+        "capacity": capacity,
         "timeline": timeline,
         "evidence": [_source_summary(source) for source in sources],
+    }
+
+
+def _recurring_care_concerns(graph: GraphSubset, event: Node) -> list[str]:
+    terms = [
+        str(node.payload.get("feedback_note") or node.payload.get("title") or node.payload.get("description") or "")
+        for node in graph.nodes
+        if node.type in {"caregiver_feedback", "scheduled_action", "nehr_record"}
+    ]
+    text = " ".join(terms).lower()
+    concerns = []
+    if "fall" in text or "gait" in text:
+        concerns.append("Falls or gait changes have appeared in the care history")
+    if "medication" in text or "levodopa" in text or "dose" in text:
+        concerns.append("Medication timing or side effects should be checked")
+    if "mobility" in text or "exercise" in text or "physio" in text:
+        concerns.append("Mobility and therapy adherence should be reviewed")
+    if event.payload.get("location"):
+        concerns.append(f"Confirm logistics for {event.payload['location']}")
+    return concerns or ["Check for changes since the previous appointment"]
+
+
+def _previous_clinician_questions(graph: GraphSubset, event: Node) -> list[str]:
+    feedback_questions = [
+        str(node.payload.get("feedback_note"))
+        for node in graph.nodes
+        if node.type == "caregiver_feedback" and node.payload.get("feedback_note") and "?" in str(node.payload.get("feedback_note"))
+    ]
+    if feedback_questions:
+        return feedback_questions
+    if event.payload.get("action_type") == "appointment":
+        return ["What symptoms or care needs should trigger an earlier review?"]
+    return []
+
+
+def _unresolved_advice(graph: GraphSubset, event: Node) -> list[str]:
+    unresolved = []
+    active_actions = [node for node in graph.nodes if node.type == "scheduled_action" and node.status != "dismissed"]
+    if any(str(node.payload.get("title", "")).lower().find("exercise") >= 0 for node in active_actions):
+        unresolved.append("Exercise routine is active; ask whether it should continue, change, or escalate.")
+    if any(str(node.payload.get("title", "")).lower().find("mobility") >= 0 for node in active_actions):
+        unresolved.append("Mobility support has been forecast; ask what evidence is needed before applying.")
+    if event.status == "pending_review":
+        unresolved.append("This appointment action is still pending caregiver review.")
+    return unresolved
+
+
+def _missing_documents(category: str, action: Node, grant: Node | None) -> list[str]:
+    existing = " ".join(str(attachment.get("name", "")) for attachment in action.payload.get("attachments", []) if isinstance(attachment, dict)).lower()
+    required_by_category = {
+        "grant": ["NRIC or citizenship proof", "Clinical memo or diagnosis evidence", "Cost estimate or quotation", "Means-test or household income document"],
+        "equipment": ["Clinical need note", "Mobility assessment", "Equipment quotation"],
+        "home_modification": ["Home safety photos", "Clinical need note", "Contractor estimate"],
+        "care_service": ["Referral note", "Care needs summary", "Caregiver contact details"],
+    }
+    required = required_by_category.get(category, required_by_category["care_service"])
+    if grant and grant.payload.get("eligibility_hints"):
+        required = [*required, "Eligibility evidence matching grant criteria"]
+    return [item for item in required if not any(token in existing for token in item.lower().split()[:2])]
+
+
+def _deadline_conflicts(action: Node, graph: GraphSubset) -> list[str]:
+    start = _parse_datetime(action.payload.get("start_at"))
+    if not start:
+        return []
+    same_week = [
+        node
+        for node in graph.nodes
+        if node.type == "scheduled_action"
+        and node.id != action.id
+        and node.status != "dismissed"
+        and (event_start := _parse_datetime(node.payload.get("start_at")))
+        and abs((event_start - start).days) <= 3
+    ]
+    conflicts = []
+    if len(same_week) >= 3:
+        conflicts.append(f"{len(same_week)} other care actions fall within three days of this deadline.")
+    if any(str(node.payload.get("action_type")) == "appointment" for node in same_week):
+        conflicts.append("A clinician appointment is nearby; use it to gather missing evidence before applying.")
+    return conflicts
+
+
+def _capacity_signal(action: Node, graph: GraphSubset) -> dict[str, Any]:
+    start = _parse_datetime(action.payload.get("start_at")) or datetime.now(UTC)
+    week_start = start - timedelta(days=start.weekday())
+    week_end = week_start + timedelta(days=7)
+    weekly_actions = [
+        node
+        for node in graph.nodes
+        if node.type == "scheduled_action"
+        and node.status != "dismissed"
+        and (event_start := _parse_datetime(node.payload.get("start_at")))
+        and week_start <= event_start < week_end
+    ]
+    load = len(weekly_actions)
+    risk = "low" if load <= 3 else "medium" if load <= 6 else "high"
+    return {
+        "weekly_action_count": load,
+        "risk": risk,
+        "note": "Keep the week manageable before adding applications or equipment visits." if risk != "low" else "Care workload looks manageable for this target week.",
     }
 
 
@@ -375,6 +495,46 @@ def _prep_detail(category: str) -> str:
     return "Prepare clinical notes, care needs, caregiver capacity, and service-provider requirements."
 
 
+async def _verify_live_results_with_openai(results: list[dict[str, Any]], settings: Settings, query: str) -> list[dict[str, Any]]:
+    if not results or not settings.live_search_llm_verification or settings.use_scripted_agent:
+        return results
+    try:
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
+        response = await client.responses.create(
+            model=settings.openai_model,
+            instructions=(
+                "You verify healthcare support search results for a caregiver app. "
+                "Return compact JSON only: {\"decisions\":[{\"url\":\"...\",\"status\":\"safe_to_show|needs_review|reject\",\"reason\":\"...\"}]}. "
+                "Prefer official, relevant, current sources. Reject unrelated or unsafe medical claims."
+            ),
+            input=json.dumps({"query": query, "results": results}, default=str),
+            max_output_tokens=500,
+        )
+        payload = json.loads(getattr(response, "output_text", "") or "{}")
+        decisions = {item.get("url"): item for item in payload.get("decisions", []) if isinstance(item, dict)}
+    except Exception:
+        return [{**result, "secondary_verification": "failed_open"} for result in results]
+
+    verified = []
+    for result in results:
+        decision = decisions.get(result.get("url"))
+        if not decision:
+            verified.append({**result, "secondary_verification": "not_returned"})
+            continue
+        status = decision.get("status")
+        if status == "reject":
+            continue
+        verified.append(
+            {
+                **result,
+                "verification_status": status if status in {"safe_to_show", "needs_review"} else result.get("verification_status", "needs_review"),
+                "secondary_verification": "openai",
+                "reason": str(decision.get("reason") or result.get("reason") or "Verified by secondary model."),
+            }
+        )
+    return verified
+
+
 async def _exa_search(query: str, api_key: str, allowlist: list[str]) -> list[dict[str, Any]]:
     async with httpx.AsyncClient(timeout=8) as client:
         response = await client.post(
@@ -392,6 +552,52 @@ async def _exa_search(query: str, api_key: str, allowlist: list[str]) -> list[di
                 "source": _source_from_url(item.get("url")),
                 "url": item.get("url"),
                 "snippet": str(item.get("text") or item.get("snippet") or "")[:400],
+                "published_at": item.get("publishedDate") or item.get("published_at"),
+            },
+            allowlist,
+        )
+        if result["verification_status"] != "reject":
+            results.append(result)
+    return results
+
+
+async def _live_search(query: str, settings: Settings, allowlist: list[str]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    if settings.exa_api_key:
+        try:
+            results = await _exa_search(query, settings.exa_api_key, allowlist)
+            if results:
+                return await _verify_live_results_with_openai(results, settings, query)
+        except httpx.HTTPError:
+            pass
+    if settings.tinyfish_api_key:
+        try:
+            results = await _tinyfish_search(query, settings.tinyfish_api_key, allowlist)
+            return await _verify_live_results_with_openai(results, settings, query)
+        except httpx.HTTPError:
+            return []
+    return []
+
+
+async def _tinyfish_search(query: str, api_key: str, allowlist: list[str]) -> list[dict[str, Any]]:
+    scoped_query = f"{query} " + " OR ".join(f"site:{domain}" for domain in allowlist)
+    async with httpx.AsyncClient(timeout=8) as client:
+        response = await client.get(
+            "https://api.search.tinyfish.ai",
+            headers={"X-API-Key": api_key},
+            params={"query": scoped_query, "location": "SG", "language": "en"},
+        )
+        response.raise_for_status()
+        data = response.json()
+    results = []
+    for item in data.get("results", [])[:5]:
+        result = verify_live_result(
+            {
+                "title": item.get("title") or "Untitled source",
+                "source": item.get("site_name") or _source_from_url(item.get("url")),
+                "url": item.get("url"),
+                "snippet": str(item.get("snippet") or "")[:400],
+                "published_at": item.get("published_at") or item.get("date"),
             },
             allowlist,
         )
@@ -406,14 +612,22 @@ def verify_live_result(result: dict[str, Any], allowlist: list[str] | None = Non
     domain = _domain(url)
     allowed = bool(domain) and any(domain == allowed or domain.endswith(f".{allowed}") for allowed in domains)
     status = "safe_to_show" if allowed and result.get("title") and result.get("snippet") else "reject"
-    reason = "Allowed source domain and usable title/snippet." if status == "safe_to_show" else "Rejected because source is missing, incomplete, or outside the allowlist."
+    recency_status = _recency_status(result.get("published_at"))
+    reason = (
+        f"Allowed source domain, usable title/snippet, recency {recency_status}."
+        if status == "safe_to_show"
+        else "Rejected because source is missing, incomplete, or outside the allowlist."
+    )
     return {
         "title": result.get("title") or "Untitled source",
         "source": result.get("source") or _source_from_url(url),
         "url": url or None,
         "snippet": result.get("snippet") or "",
+        "published_at": result.get("published_at"),
         "retrieved_at": datetime.now(UTC).isoformat(),
         "verification_status": status,
+        "recency_status": recency_status,
+        "secondary_verification": result.get("secondary_verification") or "not_run",
         "reason": reason,
     }
 
@@ -559,6 +773,18 @@ def _parse_datetime(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
+
+
+def _recency_status(value: Any) -> str:
+    published = _parse_datetime(value)
+    if not published:
+        return "unknown"
+    age = datetime.now(UTC) - published
+    if age <= timedelta(days=365):
+        return "current"
+    if age <= timedelta(days=1095):
+        return "aging"
+    return "old"
 
 
 def _ics_datetime(value: datetime) -> str:
