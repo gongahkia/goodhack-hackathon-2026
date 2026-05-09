@@ -101,12 +101,12 @@ class NodeEdit(BaseModel):
 
 
 class CaregiverNoteCreate(BaseModel):
-    text: str
+    text: str = Field(min_length=1, max_length=5000)
     recorded_at: datetime | None = None
 
 
 class ClarificationUpdate(BaseModel):
-    answer: str
+    answer: str = Field(min_length=1, max_length=2000)
     payload_patch: dict[str, Any] = Field(default_factory=dict)
 
 

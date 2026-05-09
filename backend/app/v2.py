@@ -815,6 +815,7 @@ async def _create_decision_prep_actions(
 ) -> list[Node]:
     scheduled_actions = []
     for title, offset_days, effort in [
+        (f"Research {topic} options", 21, 45),
         (f"Prepare documents for {topic} decision", 7, 40),
         (f"Family discussion: {topic} decision", 3, 30),
         (f"Final decision reminder: {topic}", 0, 20),
@@ -1167,13 +1168,13 @@ def _appointment_caregiver_questions(graph: GraphSubset, event: Node) -> list[st
     for edge in graph.edges:
         if edge.type == "clarifies" and edge.to_node == event.id:
             intent = by_id.get(edge.from_node)
-            if intent and intent.type == "care_intent" and intent.status != "dismissed":
+            if intent and intent.type == "care_intent" and intent.status == "approved":
                 linked.append(intent)
     if not linked and (event_start := _parse_datetime(event.payload.get("start_at"))):
         for node in graph.nodes:
             if node.type != "care_intent" or node.payload.get("intent_type") != "appointment_question":
                 continue
-            if node.status == "dismissed":
+            if node.status != "approved":
                 continue
             target_date = _parse_datetime(node.payload.get("target_date"))
             if target_date and target_date.date() == event_start.date():

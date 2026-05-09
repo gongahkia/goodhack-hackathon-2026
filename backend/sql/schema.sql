@@ -79,12 +79,20 @@ create table if not exists nehr_records_raw (
   ingested_at timestamptz default now()
 );
 
+create table if not exists system_state (
+  key text primary key,
+  value jsonb not null default '{}'::jsonb,
+  locked_until timestamptz,
+  updated_at timestamptz default now()
+);
+
 create index if not exists idx_nodes_type on nodes(type);
 create index if not exists idx_nodes_patient on nodes((payload->>'patient_id'));
 create index if not exists idx_edges_from on edges(from_node);
 create index if not exists idx_edges_to on edges(to_node);
 create index if not exists idx_edges_type on edges(type);
 create index if not exists idx_nehr_patient_recorded on nehr_records_raw(patient_id, recorded_at desc);
+create index if not exists idx_system_state_locked_until on system_state(locked_until);
 
 create or replace function validate_scheduled_action_provenance()
 returns trigger

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from abc import ABC, abstractmethod
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, AsyncIterator
 from uuid import UUID, uuid4
@@ -89,6 +89,15 @@ class GraphStore(ABC):
     @abstractmethod
     async def update_node_payload(self, node_id: UUID, payload: dict[str, Any], status: str) -> Node | None: ...
 
+    @abstractmethod
+    async def get_system_state(self, key: str) -> dict[str, Any] | None: ...
+
+    @abstractmethod
+    async def set_system_state(self, key: str, value: dict[str, Any], locked_until: datetime | None = None) -> dict[str, Any]: ...
+
+    @abstractmethod
+    async def acquire_system_lock(self, key: str, ttl_seconds: int) -> bool: ...
+
     async def graph_subset(self, patient_id: str, node_types: list[str] | None = None) -> GraphSubset:
         nodes = await self.list_nodes(patient_id, node_types)
         node_ids = {node.id for node in nodes}
@@ -102,6 +111,7 @@ class MemoryGraphStore(GraphStore):
         self.edges: dict[UUID, Edge] = {}
         self.logs: dict[UUID, ReasoningLog] = {}
         self.raw: dict[UUID, NehrRecordRaw] = {}
+        self.system_state: dict[str, dict[str, Any]] = {}
 
     async def init(self) -> None:
         return None
@@ -111,6 +121,7 @@ class MemoryGraphStore(GraphStore):
         self.edges.clear()
         self.logs.clear()
         self.raw.clear()
+        self.system_state.clear()
 
     async def create_reasoning_log(self, trigger: str) -> ReasoningLog:
         log = ReasoningLog(id=uuid4(), trigger=trigger, steps=[], conclusion=None, created_at=utcnow())
@@ -220,6 +231,32 @@ class MemoryGraphStore(GraphStore):
         self.nodes[node_id] = updated
         return updated
 
+    async def get_system_state(self, key: str) -> dict[str, Any] | None:
+        item = self.system_state.get(key)
+        return dict(item) if item else None
+
+    async def set_system_state(self, key: str, value: dict[str, Any], locked_until: datetime | None = None) -> dict[str, Any]:
+        item = {
+            "key": key,
+            "value": value,
+            "locked_until": locked_until,
+            "updated_at": utcnow(),
+        }
+        self.system_state[key] = item
+        return dict(item)
+
+    async def acquire_system_lock(self, key: str, ttl_seconds: int) -> bool:
+        now = utcnow()
+        item = self.system_state.get(key)
+        locked_until = item.get("locked_until") if item else None
+        if isinstance(locked_until, str):
+            locked_until = datetime.fromisoformat(locked_until)
+        if locked_until and locked_until > now:
+            return False
+        value = dict(item.get("value", {})) if item else {}
+        await self.set_system_state(key, value, now + timedelta(seconds=ttl_seconds))
+        return True
+
 
 class PostgresGraphStore(GraphStore):
     def __init__(self, database_url: str, schema_path: Path) -> None:
@@ -245,7 +282,7 @@ class PostgresGraphStore(GraphStore):
 
     async def reset_demo(self) -> None:
         async with self._conn().acquire() as conn:
-            await conn.execute("truncate edges, nodes, reasoning_logs, nehr_records_raw restart identity cascade")
+            await conn.execute("truncate edges, nodes, reasoning_logs, nehr_records_raw, system_state restart identity cascade")
 
     async def create_reasoning_log(self, trigger: str) -> ReasoningLog:
         async with self._conn().acquire() as conn:
@@ -425,6 +462,46 @@ class PostgresGraphStore(GraphStore):
             )
         return _node(row) if row else None
 
+    async def get_system_state(self, key: str) -> dict[str, Any] | None:
+        async with self._conn().acquire() as conn:
+            row = await conn.fetchrow("select * from system_state where key = $1", key)
+        return _state(row) if row else None
+
+    async def set_system_state(self, key: str, value: dict[str, Any], locked_until: datetime | None = None) -> dict[str, Any]:
+        async with self._conn().acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                insert into system_state (key, value, locked_until, updated_at)
+                values ($1, $2::jsonb, $3, now())
+                on conflict (key) do update
+                set value = excluded.value,
+                    locked_until = excluded.locked_until,
+                    updated_at = now()
+                returning *
+                """,
+                key,
+                json.dumps(value),
+                locked_until,
+            )
+        return _state(row)
+
+    async def acquire_system_lock(self, key: str, ttl_seconds: int) -> bool:
+        async with self.transaction() as conn:
+            row = await conn.fetchrow(
+                """
+                insert into system_state (key, value, locked_until, updated_at)
+                values ($1, '{}'::jsonb, now() + make_interval(secs => $2), now())
+                on conflict (key) do update
+                set locked_until = now() + make_interval(secs => $2),
+                    updated_at = now()
+                where system_state.locked_until is null or system_state.locked_until <= now()
+                returning true as acquired
+                """,
+                key,
+                ttl_seconds,
+            )
+        return bool(row and row["acquired"])
+
 
 def _node(row: Any) -> Node:
     return Node(**dict(row))
@@ -440,3 +517,13 @@ def _log(row: Any) -> ReasoningLog:
 
 def _raw(row: Any) -> NehrRecordRaw:
     return NehrRecordRaw(**dict(row))
+
+
+def _state(row: Any) -> dict[str, Any]:
+    item = dict(row)
+    return {
+        "key": item["key"],
+        "value": item["value"],
+        "locked_until": item["locked_until"],
+        "updated_at": item["updated_at"],
+    }

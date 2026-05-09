@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     scheduled_review_enabled: bool = True
     scheduled_review_interval_seconds: int = 86400
     live_search_llm_verification: bool = True
+    api_write_key: str | None = None
+    clinician_review_key: str | None = None
+    scheduled_review_lock_ttl_seconds: int = 3600
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
