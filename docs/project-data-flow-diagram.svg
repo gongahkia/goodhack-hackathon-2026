@@ -33,7 +33,7 @@
   <text x="238" y="345" class="txt small">Session Node Created</text>
 
   <rect x="100" y="415" width="275" height="70" class="box" fill="#bae6fd" stroke="#0284c7"/>
-  <text x="238" y="441" class="txt node">STT Provider</text>
+  <text x="238" y="441" class="txt node">STT Agent</text>
   <text x="238" y="465" class="txt small">OpenAI | Groq | Local</text>
 
   <rect x="100" y="535" width="275" height="70" class="box" fill="#fef3c7" stroke="#d97706"/>
@@ -45,11 +45,11 @@
   <text x="238" y="705" class="txt small">Placeholder Map Stored</text>
 
   <rect x="100" y="775" width="275" height="70" class="box" fill="#e9d5ff" stroke="#9333ea"/>
-  <text x="238" y="801" class="txt node">Extracted Entities</text>
+  <text x="238" y="801" class="txt node">Extraction Agent</text>
   <text x="238" y="825" class="txt small">Medication | Time | Research Intent</text>
 
   <rect x="100" y="895" width="275" height="70" class="box" fill="#fff7ed" stroke="#f97316"/>
-  <text x="238" y="921" class="txt node">Triage Decision</text>
+  <text x="238" y="921" class="txt node">Triage Agent</text>
   <text x="238" y="945" class="txt small">Routes To Three Buckets</text>
 
   <path d="M238 245 L238 295" class="arrow"/>
@@ -66,8 +66,9 @@
   <text x="650" y="210" class="txt section">Appointment Time</text>
 
   <rect x="575" y="250" width="170" height="78" class="box" fill="#fce7f3" stroke="#db2777"/>
-  <text x="660" y="278" class="txt small">Appointment</text>
-  <text x="660" y="302" class="txt small">Candidate</text>
+  <text x="660" y="270" class="txt small">Appointment</text>
+  <text x="660" y="290" class="txt small">Candidate</text>
+  <text x="660" y="310" class="txt small">Agent</text>
 
   <rect x="800" y="250" width="170" height="78" class="box" fill="#fce7f3" stroke="#db2777"/>
   <text x="885" y="278" class="txt small">User Approval</text>
@@ -99,8 +100,9 @@
   <text x="630" y="480" class="txt section">Daily Task</text>
 
   <rect x="575" y="520" width="170" height="78" class="box" fill="#dcfce7" stroke="#16a34a"/>
-  <text x="660" y="548" class="txt small">Daily Task</text>
-  <text x="660" y="572" class="txt tiny">Pending Review</text>
+  <text x="660" y="540" class="txt small">Daily Task</text>
+  <text x="660" y="560" class="txt small">Agent</text>
+  <text x="660" y="580" class="txt tiny">Pending Review</text>
 
   <rect x="800" y="520" width="170" height="78" class="box" fill="#dcfce7" stroke="#16a34a"/>
   <text x="885" y="548" class="txt small">User Review</text>
@@ -132,15 +134,18 @@
   <text x="665" y="750" class="txt section">Ad Hoc Research</text>
 
   <rect x="575" y="800" width="150" height="78" class="box" fill="#ede9fe" stroke="#7c3aed"/>
-  <text x="650" y="828" class="txt small">Research</text>
-  <text x="650" y="852" class="txt small">Task</text>
+  <text x="650" y="820" class="txt small">Research</text>
+  <text x="650" y="840" class="txt small">Task</text>
+  <text x="650" y="860" class="txt small">Agent</text>
 
   <rect x="775" y="800" width="150" height="78" class="box" fill="#ede9fe" stroke="#7c3aed"/>
-  <text x="850" y="828" class="txt small">Research</text>
-  <text x="850" y="852" class="txt small">Plan</text>
+  <text x="850" y="820" class="txt small">Research</text>
+  <text x="850" y="840" class="txt small">Plan</text>
+  <text x="850" y="860" class="txt small">Agent</text>
 
   <rect x="975" y="800" width="150" height="78" class="box" fill="#ede9fe" stroke="#7c3aed"/>
-  <text x="1050" y="839" class="txt small">Guardrail</text>
+  <text x="1050" y="828" class="txt small">Guardrail</text>
+  <text x="1050" y="852" class="txt small">Agent</text>
 
   <rect x="1175" y="800" width="170" height="78" class="box" fill="#fae8ff" stroke="#a21caf"/>
   <text x="1260" y="828" class="txt small">Search + Fetch</text>
@@ -151,8 +156,9 @@
   <text x="1470" y="852" class="txt small">Results</text>
 
   <rect x="1595" y="800" width="170" height="78" class="box" fill="#ede9fe" stroke="#7c3aed"/>
-  <text x="1680" y="828" class="txt small">Synthesized</text>
-  <text x="1680" y="852" class="txt small">Recommendation</text>
+  <text x="1680" y="820" class="txt small">Synthesized</text>
+  <text x="1680" y="840" class="txt small">Recommendation</text>
+  <text x="1680" y="860" class="txt small">Agent</text>
 
   <path d="M375 930 C475 930, 480 839, 575 839" class="arrow"/>
   <path d="M725 839 L775 839" class="arrow"/>
