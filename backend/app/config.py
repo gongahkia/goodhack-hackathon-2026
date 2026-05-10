@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str | None = None
     openai_api_key: str | None = Field(default=None, repr=False)
-    openai_model: str = "gpt-4o"
+    openai_model: str = "gpt-5.5"
     exa_api_key: str | None = Field(default=None, repr=False)
     tinyfish_api_key: str | None = Field(default=None, repr=False)
     jina_api_key: str | None = Field(default=None, repr=False)
