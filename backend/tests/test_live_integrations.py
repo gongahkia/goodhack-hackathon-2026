@@ -11,8 +11,8 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
-from fastapi.testclient import TestClient
 from dotenv import load_dotenv
+from fastapi.testclient import TestClient
 
 import app.main as main
 import app.transcript_pipeline as transcript_pipeline
@@ -177,6 +177,9 @@ def test_live_external_provider_full_api_e2e(monkeypatch):
         sealion_api_key=os.environ["SEALION_API_KEY"],
         sealion_transcript_review_enabled=True,
         live_search_llm_verification=False,
+        research_fetch_max_urls=1,
+        research_extraction_timeout_seconds=30,
+        tinyfish_fetch_timeout_seconds=30,
         google_calendar_access_token=access_token,
         google_calendar_id=calendar_id,
     )

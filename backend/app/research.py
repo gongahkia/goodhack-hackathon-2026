@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from dataclasses import dataclass
@@ -472,7 +473,7 @@ async def _enrich_sources_with_page_research(
         source
         for source in sources
         if source.url and source.verification_status != "reject" and source.claim_status != "rejected_or_unsafe"
-    ])[:RESEARCH_FETCH_MAX_URLS]
+    ])[: max(0, min(settings.research_fetch_max_urls, RESEARCH_FETCH_MAX_URLS))]
     if not candidates:
         return sources
 
@@ -579,25 +580,30 @@ async def _extract_single_research_page_with_openai(
         }
     )
     try:
-        response = await client.responses.create(
-            model=settings.openai_model,
-            instructions=(
-                "Extract structured caregiver support research from one fetched page. "
-                "Use only source.page_text, not search snippets or prior knowledge. "
-                "Return one compact JSON object only with keys: url, relevance_status, summary, "
-                "verified_facts, eligibility_criteria, support_amounts, required_documents, application_steps, "
-                "contact_or_links, community_tips, needs_verification, caveats. "
-                "relevance_status must be relevant, not_relevant, error_page, or unclear. "
-                "Use error_page for 404/not-found/login/scam-warning pages that do not contain the requested research details. "
-                "Use at most 4 short items per list and keep each item under 25 words. "
-                "Paraphrase; do not give medical advice; leave a list empty when the page does not state it."
+        response = await asyncio.wait_for(
+            client.responses.create(
+                model=settings.openai_model,
+                instructions=(
+                    "Extract structured caregiver support research from one fetched page. "
+                    "Use only source.page_text, not search snippets or prior knowledge. "
+                    "Return one compact JSON object only with keys: url, relevance_status, summary, "
+                    "verified_facts, eligibility_criteria, support_amounts, required_documents, application_steps, "
+                    "contact_or_links, community_tips, needs_verification, caveats. "
+                    "relevance_status must be relevant, not_relevant, error_page, or unclear. "
+                    "Use error_page for 404/not-found/login/scam-warning pages that do not contain the requested research details. "
+                    "Use at most 4 short items per list and keep each item under 25 words. "
+                    "Paraphrase; do not give medical advice; leave a list empty when the page does not state it."
+                ),
+                input=json.dumps(payload, ensure_ascii=False, default=str),
+                max_output_tokens=1800,
             ),
-            input=json.dumps(payload, ensure_ascii=False, default=str),
-            max_output_tokens=1800,
+            timeout=max(1, settings.research_extraction_timeout_seconds),
         )
         raw = getattr(response, "output_text", "") or "{}"
         parsed = _parse_json_object(raw)
         incomplete = getattr(response, "incomplete_details", None)
+    except TimeoutError:
+        return ExtractionAttempt(error="OpenAI research extraction timed out.")
     except Exception as exc:
         return ExtractionAttempt(error=f"OpenAI research extraction failed: {sanitize_research_error(exc)}")
 

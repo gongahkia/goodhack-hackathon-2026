@@ -5,7 +5,7 @@ import pytest
 
 from app.config import Settings
 from app.extraction import process_redacted_transcript
-from app.privacy import redact_transcript_direct_pii, rehydrate_placeholders
+from app.privacy import PiiRedactor, redact_transcript_direct_pii, rehydrate_placeholders
 from app.store import MemoryGraphStore
 from app.transcript_pipeline import ingest_audio_transcription, redact_stored_transcript
 from app.transcription import TranscriptionInputError, TranscriptionResult, TranscriptionUnavailable, normalize_transcription_language, transcribe_audio, transcription_prompt
@@ -153,6 +153,19 @@ def test_transcript_direct_pii_redaction_preserves_quasi_identifiers_and_medicat
     assert redaction["redacted_text"] == "PERSON_1 aged 78 needs Panadol 500mg before lunch on 28 Jan. Call PHONE_1."
     assert redaction["placeholder_map"] == {"PERSON_1": "John", "PHONE_1": "+65 9123 4567"}
     assert "AGE" not in redaction["privacy"]["detected_categories"]
+
+
+def test_redaction_keeps_dob_dates_and_kinship_month_aliases_for_scheduling():
+    redaction = redact_transcript_direct_pii(
+        "Aunt May needs Panadol before lunch. DOB 28 Jan 1948. Appointment on 28 Jan at 10am.",
+        known_people=["Aunt May"],
+    )
+
+    assert redaction["redacted_text"] == "Aunt May needs Panadol before lunch. DOB 28 Jan 1948. Appointment on 28 Jan at 10am."
+    assert redaction["placeholder_map"] == {}
+
+    structured = PiiRedactor().redact({"dob": "28 Jan 1948", "date_of_birth": "1948-01-28", "birth_date": "28/01/1948"})
+    assert structured == {"dob": "28 Jan 1948", "date_of_birth": "1948-01-28", "birth_date": "28/01/1948"}
 
 
 def test_rehydrate_placeholders_rejects_unknown_placeholder_ids():

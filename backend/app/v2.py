@@ -1789,7 +1789,7 @@ async def tinyfish_fetch_urls(
             "error": "No URLs passed the allowlist.",
         }
     try:
-        fetched = await _tinyfish_fetch(allowed_urls, settings.tinyfish_api_key, format)
+        fetched = await _tinyfish_fetch(allowed_urls, settings.tinyfish_api_key, format, settings.tinyfish_fetch_timeout_seconds)
         return {
             "provider": "tinyfish_fetch",
             "configured": True,
@@ -2110,8 +2110,8 @@ async def _tinyfish_search(query: str, api_key: str, allowlist: list[str], locat
     return results
 
 
-async def _tinyfish_fetch(urls: list[str], api_key: str, format: str = "markdown") -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=150) as client:
+async def _tinyfish_fetch(urls: list[str], api_key: str, format: str = "markdown", timeout_seconds: int = 150) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=max(1, timeout_seconds)) as client:
         response = await client.post(
             "https://api.fetch.tinyfish.ai",
             headers={"X-API-Key": api_key},

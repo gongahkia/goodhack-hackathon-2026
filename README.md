@@ -77,7 +77,7 @@
 - `make install`: Create backend venv and install deps.
 - `make backend`: Run FastAPI on `127.0.0.1:8000`.
 - `make test`: Run backend tests with `pytest -q`.
-- `make live-external-e2e`: Run opt-in live external-provider E2E.
+- `make live-external-e2e`: Run opt-in live OpenAI, Google Calendar, SEA-LION, and TinyFish/Exa E2E.
 - `make robustness-loop`: Run bounded frontend-readiness robustness checks.
 - `make clean`: Remove backend cache artifacts.
 - Full backend suite: `TINYFISH_API_KEY= SEALION_API_KEY= backend/.venv/bin/python -m pytest backend/tests`.

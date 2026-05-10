@@ -83,11 +83,12 @@ RUN_LIVE_EXTERNAL_E2E=1 \
 OPENAI_API_KEY=... \
 GOOGLE_CALENDAR_ACCESS_TOKEN=... \
 GOOGLE_CALENDAR_ID=primary \
+SEALION_API_KEY=... \
 TINYFISH_API_KEY=... \
 make live-external-e2e
 ```
 
-This test uses the backend API surface, real OpenAI transcription, real Google Calendar read/write, and live TinyFish or Exa research. It creates temporary calendar events and deletes them by default. Set `LIVE_EXTERNAL_E2E_AUDIO_PATH=/absolute/path/to/demo.wav` to use a prerecorded clip; otherwise macOS `say` and `afconvert` generate audio from the built-in caregiver scenario.
+This test uses the backend API surface, real OpenAI transcription, real Google Calendar read/write, live SEA-LION review/SEA-Guard, and live TinyFish or Exa research. It creates temporary calendar events and deletes them by default. Set `LIVE_EXTERNAL_E2E_AUDIO_PATH=/absolute/path/to/demo.wav` to use a prerecorded clip; otherwise macOS `say` and `afconvert` generate audio from the built-in caregiver scenario.
 
 Run the opt-in multilingual OpenAI quality checks with one audio file and expected transcript per language:
 

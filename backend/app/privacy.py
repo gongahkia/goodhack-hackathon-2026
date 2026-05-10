@@ -10,12 +10,16 @@ EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECAS
 NRIC_RE = re.compile(r"\b[STFGM]\d{7}[A-Z]\b", re.IGNORECASE)
 SG_PHONE_RE = re.compile(r"(?<!\d)(?:\+65[\s-]?)?[689]\d{3}[\s-]?\d{4}(?!\d)")
 GENERIC_PHONE_RE = re.compile(r"(?<!\d)(?:\+\d{1,3}[\s-]?)?(?:\d{3}[\s-]){2}\d{4}(?!\d)")
-DOB_RE = re.compile(r"\b(?:date of birth|dob|born)\s*[:\-]?\s*([0-3]?\d[ /\-.][A-Za-z]{3,9}|\d{1,4}[ /\-.]\d{1,2}[ /\-.]\d{1,4})", re.IGNORECASE)
 AGE_RE = re.compile(r"\b(age|aged)\s+(\d{1,3})\b", re.IGNORECASE)
 TITLED_NAME_RE = re.compile(r"\b(?:Mdm|Madam|Mr|Mrs|Ms)\.?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}\b")
 CONTEXTUAL_NAME_RE = re.compile(r"\b([A-Z][a-z]{1,40})(?=\s+(?:aged|age|needs|need|must|should|may|might|has|had|will|takes|take|requires|require)\b)")
 ADDRESS_HINT_RE = re.compile(r"\b(?:blk|block|unit|#\d|street|road|avenue|ave|lane|drive|postal|postcode)\b", re.IGNORECASE)
 PLACEHOLDER_RE = re.compile(r"\b[A-Z][A-Z_]*_\d+\b")
+KINSHIP_MONTH_ALIAS_RE = re.compile(
+    r"\b(?:aunt|auntie|aunty|uncle|ah ma|grandma|grandmother|mom|mum|mother|mama)\s+"
+    r"(?:jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)\b",
+    re.IGNORECASE,
+)
 NON_PERSON_CONTEXTUAL_NAMES = {
     "Panadol",
     "Paracetamol",
@@ -24,6 +28,29 @@ NON_PERSON_CONTEXTUAL_NAMES = {
     "Aspirin",
     "HealthHub",
     "Singpass",
+    "Jan",
+    "January",
+    "Feb",
+    "February",
+    "Mar",
+    "March",
+    "Apr",
+    "April",
+    "May",
+    "Jun",
+    "June",
+    "Jul",
+    "July",
+    "Aug",
+    "August",
+    "Sep",
+    "September",
+    "Oct",
+    "October",
+    "Nov",
+    "November",
+    "Dec",
+    "December",
 }
 
 KEY_CATEGORY = {
@@ -33,9 +60,6 @@ KEY_CATEGORY = {
     "phone": "PHONE",
     "mobile": "PHONE",
     "email": "EMAIL",
-    "dob": "DOB",
-    "date_of_birth": "DOB",
-    "birth_date": "DOB",
     "age": "AGE",
     "address": "ADDRESS",
     "postal_code": "ADDRESS",
@@ -122,13 +146,12 @@ class PiiRedactor:
     def _redact_text(self, text: str) -> str:
         redacted = text
         for raw, category in sorted(self.seed_identifiers.items(), key=lambda item: len(item[0]), reverse=True):
-            if raw:
+            if raw and not _is_kinship_month_alias(raw):
                 redacted = re.sub(re.escape(raw), lambda match, item_category=category: self._placeholder(match.group(0), item_category), redacted, flags=re.IGNORECASE)
         redacted = EMAIL_RE.sub(lambda match: self._placeholder(match.group(0), "EMAIL"), redacted)
         redacted = NRIC_RE.sub(lambda match: self._placeholder(match.group(0), "NRIC"), redacted)
         redacted = SG_PHONE_RE.sub(lambda match: self._placeholder(match.group(0), "PHONE"), redacted)
         redacted = GENERIC_PHONE_RE.sub(lambda match: self._placeholder(match.group(0), "PHONE"), redacted)
-        redacted = DOB_RE.sub(lambda match: match.group(0).replace(match.group(1), self._placeholder(match.group(1), "DOB")), redacted)
         if self.redact_age:
             redacted = AGE_RE.sub(lambda match: f"{match.group(1)} {self._placeholder(match.group(2), 'AGE')}", redacted)
         redacted = TITLED_NAME_RE.sub(lambda match: self._placeholder(match.group(0), "PERSON"), redacted)
@@ -241,3 +264,7 @@ def _redact_address_fragments(text: str, redactor: PiiRedactor) -> str:
     for pattern in patterns:
         redacted = pattern.sub(lambda match: redactor._placeholder(match.group(0), "ADDRESS"), redacted)
     return redacted
+
+
+def _is_kinship_month_alias(value: str) -> bool:
+    return bool(KINSHIP_MONTH_ALIAS_RE.fullmatch(value.strip()))

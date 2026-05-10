@@ -226,7 +226,7 @@ TINYFISH_API_KEY= SEALION_API_KEY= backend/.venv/bin/python -m pytest backend/te
 
 ### Live External Provider E2E Test
 
-Use this exact format once real tokens are available. This is the discovery anchor for future agents: `test_live_external_provider_full_api_e2e` is the one live external-provider E2E. It invokes backend APIs and uses real OpenAI transcription, real Google Calendar read/write, and live TinyFish or Exa research. CI should not run it because it spends external API quota and writes temporary events to the demo calendar.
+Use this exact format once real tokens are available. This is the discovery anchor for future agents: `test_live_external_provider_full_api_e2e` is the one live external-provider E2E. It invokes backend APIs and uses real OpenAI transcription, real Google Calendar read/write, live SEA-LION transcript/extraction review plus SEA-Guard, and live TinyFish or Exa research. CI should not run it because it spends external API quota and writes temporary events to the demo calendar.
 
 Required live env:
 
@@ -234,6 +234,7 @@ Required live env:
 export OPENAI_API_KEY=sk-...
 export GOOGLE_CALENDAR_ACCESS_TOKEN=ya29...
 export GOOGLE_CALENDAR_ID=primary
+export SEALION_API_KEY=...
 export TINYFISH_API_KEY=sk-...
 # or: export EXA_API_KEY=...
 export RUN_LIVE_EXTERNAL_E2E=1

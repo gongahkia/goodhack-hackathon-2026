@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     transcription_rate_limit: int = 20
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     live_search_llm_verification: bool = True
+    research_fetch_max_urls: int = 6
+    research_extraction_timeout_seconds: int = 60
+    tinyfish_fetch_timeout_seconds: int = 150
     api_read_key: str | None = Field(default=None, repr=False)
     api_write_key: str | None = Field(default=None, repr=False)
     clinician_review_key: str | None = Field(default=None, repr=False)
