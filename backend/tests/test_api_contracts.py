@@ -200,6 +200,91 @@ def test_daily_task_edit_route_validates_overrides_and_records_feedback(monkeypa
     assert feedback[0].payload["target_node_id"] == str(task.id)
 
 
+def test_appointments_route_returns_active_candidates_only(monkeypatch):
+    store = _install_test_app(monkeypatch)
+
+    async def seed_appointments():
+        active = await store.create_node(
+            "appointment_candidate",
+            {
+                "patient_id": "mdm-tan",
+                "title": "Neurology follow-up",
+                "date": "2026-05-25",
+                "time": "10:00",
+                "calendar_write_status": "pending_user_approval",
+            },
+            "agent",
+            status="pending_review",
+        )
+        await store.create_node(
+            "appointment_candidate",
+            {"patient_id": "mdm-tan", "title": "Dismissed appointment", "date": "2026-05-26"},
+            "agent",
+            status="dismissed",
+        )
+        return active
+
+    active = asyncio.run(seed_appointments())
+
+    with TestClient(main.app) as client:
+        response = client.get("/appointments", headers=_headers())
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()] == [str(active.id)]
+    assert response.json()[0]["payload"]["title"] == "Neurology follow-up"
+
+
+def test_schedule_day_route_returns_deterministic_scheduled_and_goal_buckets(monkeypatch):
+    store = _install_test_app(monkeypatch)
+
+    async def seed_tasks():
+        scheduled = await store.create_node(
+            "daily_task",
+            {
+                "patient_id": "mdm-tan",
+                "title": "Aspirin 100mg",
+                "description": "Take with breakfast.",
+                "scheduled_time": "08:00",
+                "scheduling_semantics": "fixed_clinical",
+            },
+            "agent",
+            status="pending_review",
+        )
+        goal = await store.create_node(
+            "daily_task",
+            {"patient_id": "mdm-tan", "title": "Fluid intake", "description": "6 to 8 cups."},
+            "agent",
+            status="approved",
+        )
+        return scheduled, goal
+
+    scheduled, goal = asyncio.run(seed_tasks())
+
+    with TestClient(main.app) as client:
+        response = client.get("/schedule/day", headers=_headers(), params={"date": "2026-05-10"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["date"] == "2026-05-10"
+    assert body["timezone"] == "Asia/Singapore"
+    by_id = {item["node_id"]: item for item in body["items"]}
+    assert by_id[str(scheduled.id)]["bucket"] == "scheduled"
+    assert by_id[str(scheduled.id)]["time_label"] == "8:00 AM"
+    assert by_id[str(scheduled.id)]["schedule_source"] == "explicit"
+    assert by_id[str(goal.id)]["bucket"] == "goal"
+    assert by_id[str(goal.id)]["time_label"] == "Anytime"
+    assert body["calendar_events"] == []
+    assert body["conflicts"] == []
+
+
+def test_cors_default_allows_vite_dev_origins():
+    settings = Settings(_env_file=None)
+    origins = set(settings.cors_origins.split(","))
+
+    assert "http://localhost:5173" in origins
+    assert "http://127.0.0.1:5173" in origins
+
+
 def test_schedule_conflict_resolution_rejects_collision_then_accepts_safe_custom_time(monkeypatch):
     store = _install_test_app(monkeypatch)
 

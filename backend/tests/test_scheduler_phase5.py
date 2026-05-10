@@ -10,7 +10,7 @@ from app.notifications import build_notifications
 import asyncio
 
 import app.scheduler as scheduler_module
-from app.scheduler import CalendarEvent, GoogleCalendarProvider, SINGAPORE_TZ, daily_scheduler_loop, run_next_day_schedule_check, run_next_day_schedule_check_once
+from app.scheduler import CalendarEvent, GoogleCalendarProvider, SINGAPORE_TZ, build_day_schedule, daily_scheduler_loop, run_next_day_schedule_check, run_next_day_schedule_check_once
 from app.store import MemoryGraphStore
 
 
@@ -139,6 +139,40 @@ async def test_scheduler_suggests_alternative_for_movable_routine_conflict():
     conflict = result["schedule_conflicts"][0]["payload"]
     assert conflict["classification"] == "movable"
     assert conflict["suggested_time"]
+
+
+@pytest.mark.asyncio
+async def test_day_schedule_returns_scheduled_goal_and_live_calendar_conflict():
+    store = MemoryGraphStore()
+    target = datetime(2026, 5, 10, tzinfo=SINGAPORE_TZ)
+    fixed = await _daily_task(
+        store,
+        {
+            "title": "Give Panadol before lunch",
+            "timing_relation": "before lunch",
+            "scheduling_semantics": "fixed_clinical",
+            "description": "Take with food.",
+        },
+    )
+    goal = await _daily_task(store, {"title": "Fluid intake monitoring", "description": "6 to 8 cups."})
+    provider = FakeCalendarProvider(
+        [CalendarEvent(id="calendar-3", title="Lunch with Mandy", start_at=target.replace(hour=11), end_at=target.replace(hour=12))]
+    )
+
+    result = await build_day_schedule(store, "patient-1", Settings(), target.date(), calendar_provider=provider)
+
+    assert result["date"] == "2026-05-10"
+    assert result["calendar_events"][0]["title"] == "Lunch with Mandy"
+    by_id = {item["node_id"]: item for item in result["items"]}
+    assert by_id[str(fixed.id)]["bucket"] == "scheduled"
+    assert by_id[str(fixed.id)]["time_label"] == "11:30 AM"
+    assert by_id[str(fixed.id)]["schedule_source"] == "timing_relation"
+    assert by_id[str(goal.id)]["bucket"] == "goal"
+    assert by_id[str(goal.id)]["time_label"] == "Anytime"
+    assert result["conflicts"][0]["classification"] == "fixed"
+    assert result["conflicts"][0]["calendar_event_id"] == "calendar-3"
+    assert result["conflicts"][0]["suggested_time"] is None
+    assert by_id[str(fixed.id)]["conflict"]["calendar_event_title"] == "Lunch with Mandy"
 
 
 @pytest.mark.asyncio

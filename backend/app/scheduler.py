@@ -63,6 +63,42 @@ class GoogleCalendarProvider:
         return [_calendar_event_from_google(item, start_at.tzinfo or SINGAPORE_TZ) for item in response.json().get("items", [])]
 
 
+async def build_day_schedule(
+    store: GraphStore,
+    patient_id: str,
+    settings: Settings,
+    target_date: date,
+    calendar_provider: CalendarProvider | None = None,
+) -> dict[str, Any]:
+    window_start = datetime.combine(target_date, time.min, tzinfo=SINGAPORE_TZ)
+    window_end = window_start + timedelta(days=1)
+    provider = calendar_provider or GoogleCalendarProvider(settings, store, patient_id)
+    events = await provider.list_events(window_start, window_end)
+    tasks = [node for node in await store.list_nodes(patient_id, ["daily_task"]) if node.status != "dismissed"]
+
+    items: list[dict[str, Any]] = []
+    conflicts: list[dict[str, Any]] = []
+    for task in tasks:
+        candidate = _candidate_time_for_task(task, target_date)
+        if not candidate:
+            items.append(_schedule_item(task, "goal", None, None, None))
+            continue
+        start_at, end_at = candidate
+        overlap = next((event for event in events if event.busy and _overlaps(start_at, end_at, event.start_at, event.end_at)), None)
+        conflict = _day_schedule_conflict(task, start_at, end_at, overlap, events, target_date) if overlap else None
+        if conflict:
+            conflicts.append(conflict)
+        items.append(_schedule_item(task, "scheduled", start_at, end_at, conflict))
+
+    return {
+        "date": target_date.isoformat(),
+        "timezone": SINGAPORE_TZ.key,
+        "items": sorted(items, key=_schedule_item_sort_key),
+        "calendar_events": [_calendar_event_payload(event) for event in events],
+        "conflicts": conflicts,
+    }
+
+
 async def run_next_day_schedule_check(
     store: GraphStore,
     patient_id: str,
@@ -262,6 +298,80 @@ def _candidate_time_for_task(task: Node, target_date: date) -> tuple[datetime, d
     duration = int(payload.get("estimated_duration_minutes") or payload.get("estimated_effort_minutes") or 15)
     start_at = datetime.combine(target_date, start_time, tzinfo=_task_tz(payload))
     return start_at, start_at + timedelta(minutes=max(5, min(duration, 240)))
+
+
+def _schedule_item(task: Node, bucket: str, start_at: datetime | None, end_at: datetime | None, conflict: dict[str, Any] | None) -> dict[str, Any]:
+    return {
+        "node_id": str(task.id),
+        "title": str(task.payload.get("title") or "Daily task"),
+        "detail": _task_detail(task),
+        "status": task.status,
+        "bucket": bucket,
+        "start_at": start_at.isoformat() if start_at else None,
+        "end_at": end_at.isoformat() if end_at else None,
+        "time_label": _time_label(start_at) if start_at else "Anytime",
+        "schedule_source": _schedule_source(task),
+        "conflict": conflict,
+    }
+
+
+def _schedule_item_sort_key(item: dict[str, Any]) -> tuple[int, str, str]:
+    return (0 if item["bucket"] == "scheduled" else 1, str(item.get("start_at") or ""), str(item["title"]).lower())
+
+
+def _task_detail(task: Node) -> str | None:
+    payload = task.payload
+    return payload.get("user_visible_description") or payload.get("description") or payload.get("instructions") or payload.get("original_instruction_redacted")
+
+
+def _schedule_source(task: Node) -> str:
+    payload = task.payload
+    if _effective_payload_value(payload, "scheduled_time") or _effective_payload_value(payload, "time"):
+        return "explicit"
+    if _effective_payload_value(payload, "timing_relation"):
+        return "timing_relation"
+    return "unspecified"
+
+
+def _day_schedule_conflict(
+    task: Node,
+    start_at: datetime,
+    end_at: datetime,
+    event: CalendarEvent,
+    events: list[CalendarEvent],
+    target_date: date,
+) -> dict[str, Any]:
+    semantics = _effective_semantics(task)
+    fixed = semantics in {"fixed_clinical", "fixed_deadline"}
+    return {
+        "id": f"computed:{task.id}:{event.id}:{start_at.isoformat()}",
+        "node_id": str(task.id),
+        "calendar_event_id": event.id,
+        "calendar_event_title": event.title,
+        "calendar_event_start_at": event.start_at.isoformat(),
+        "calendar_event_end_at": event.end_at.isoformat(),
+        "classification": "fixed" if fixed else "movable",
+        "reason": _conflict_reason(task, event, fixed),
+        "task_time": {"start_at": start_at.isoformat(), "end_at": end_at.isoformat()},
+        "suggested_time": None if fixed else _suggest_alternative_time(start_at, end_at, events, target_date),
+        "source": "computed",
+    }
+
+
+def _calendar_event_payload(event: CalendarEvent) -> dict[str, Any]:
+    return {
+        "id": event.id,
+        "title": event.title,
+        "start_at": event.start_at.isoformat(),
+        "end_at": event.end_at.isoformat(),
+        "busy": event.busy,
+    }
+
+
+def _time_label(value: datetime) -> str:
+    hour = value.hour % 12 or 12
+    suffix = "AM" if value.hour < 12 else "PM"
+    return f"{hour}:{value.minute:02d} {suffix}"
 
 
 def _task_tz(payload: dict[str, Any]):

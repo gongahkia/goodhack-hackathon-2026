@@ -90,6 +90,8 @@
 - `POST /transcripts/{transcript_id}/process`
 - `GET /tasks/daily`
 - `PATCH /tasks/daily/{task_id}`
+- `GET /appointments`
+- `GET /schedule/day`
 - `POST /scheduler/next-day-check`
 - `POST /scheduler/cron/next-day-check`
 - `GET /schedule-conflicts`

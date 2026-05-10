@@ -33,6 +33,12 @@ export interface Task {
   nextSteps?: NextStep[]
   recurrence?: Recurrence
   activePeriod?: ActivePeriod
+  backendNodeId?: string
+  backendType?: 'daily_task' | 'appointment_candidate' | 'ad_hoc_research_task' | 'synthesized_recommendation'
+  backendStatus?: string
+  calendarWriteStatus?: string
+  researchStatus?: string
+  recommendationId?: string
 }
 
 export interface Recording {

@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     transcription_max_bytes: int = 25 * 1024 * 1024
     transcription_timeout_seconds: int = 120
     transcription_rate_limit: int = 20
-    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173"
     live_search_llm_verification: bool = True
     research_fetch_max_urls: int = 6
     research_extraction_timeout_seconds: int = 60

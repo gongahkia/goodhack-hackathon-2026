@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import date as Date, datetime
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect, status
@@ -19,7 +20,7 @@ from .compliance import (
     record_consent,
     record_processing_activity,
 )
-from .config import get_settings
+from .config import PATIENT_TZ, get_settings
 from .eval import evaluate_care_plan
 from .extraction import process_redacted_transcript
 from .graph_queries import backtrace_sources
@@ -30,7 +31,7 @@ from .notifications import build_notifications
 from .patient import PATIENT, PATIENT_ID
 from .privacy import PiiRedactor, sanitize_audit_payload
 from .research import run_guarded_research_pipeline
-from .scheduler import daily_scheduler_loop, list_active_schedule_conflicts, resolve_schedule_conflict, run_next_day_schedule_check, run_next_day_schedule_check_once
+from .scheduler import build_day_schedule, daily_scheduler_loop, list_active_schedule_conflicts, resolve_schedule_conflict, run_next_day_schedule_check, run_next_day_schedule_check_once
 from .security import InMemoryRateLimiter, key_matches, rate_limit_key, require_pilot_security, sanitize_public
 from .transcript_pipeline import ingest_audio_transcription, redact_stored_transcript
 from .store import GraphStore, MemoryGraphStore, PostgresGraphStore
@@ -533,6 +534,12 @@ async def daily_tasks() -> list[dict]:
     return sanitize_public([node.model_dump(mode="json") for node in nodes if node.status != "dismissed"])
 
 
+@app.get("/appointments", dependencies=[Depends(require_read_access)])
+async def appointments() -> list[dict]:
+    nodes = await store.list_nodes(PATIENT_ID, ["appointment_candidate"])
+    return sanitize_public([node.model_dump(mode="json") for node in nodes if node.status != "dismissed"])
+
+
 @app.patch("/tasks/daily/{task_id}", dependencies=[Depends(require_write_access)])
 async def patch_daily_task(task_id: UUID, patch: dict) -> dict:
     task = await store.get_node(task_id)
@@ -552,6 +559,12 @@ async def scheduler_next_day_check() -> dict:
 @app.post("/scheduler/cron/next-day-check", dependencies=[Depends(require_cron_access)])
 async def scheduler_cron_next_day_check(force: bool = Query(False)) -> dict:
     return sanitize_public(await run_next_day_schedule_check_once(store, PATIENT_ID, settings, force=force))
+
+
+@app.get("/schedule/day", dependencies=[Depends(require_read_access)])
+async def schedule_day(target_date: Date | None = Query(default=None, alias="date")) -> dict:
+    day = target_date or datetime.now(PATIENT_TZ).date()
+    return sanitize_public(await build_day_schedule(store, PATIENT_ID, settings, day))
 
 
 @app.get("/schedule-conflicts", dependencies=[Depends(require_read_access)])
