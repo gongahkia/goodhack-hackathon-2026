@@ -249,11 +249,12 @@ async def maybe_secondary_research_guardrail_with_sealion(
             "question_redacted": task.payload.get("question_redacted"),
             "research_plan": plan_node.payload,
             "local_guardrail": local_guardrail_node.payload,
-            "mode": "flag_only_do_not_block",
+            "mode": "two_stage_gate_block_on_high_risk_or_medical_advice",
         },
         ensure_ascii=False,
     )
     review = await sealion_guard_json_review(settings, prompt=prompt)
+    decision = _classify_secondary_guardrail_decision(review.get("result"))
     payload = {
         "patient_id": patient_id,
         "kind": "sealion_secondary_research_guardrail",
@@ -262,7 +263,7 @@ async def maybe_secondary_research_guardrail_with_sealion(
         "model": review.get("model"),
         "local_guardrail_review_id": str(local_guardrail_node.id),
         "research_plan_id": str(plan_node.id),
-        "decision": "flag_only",
+        "decision": decision,
         "result": review.get("result"),
         "raw_result": review.get("raw_result") if review.get("parse_error") else None,
         "parse_error": review.get("parse_error"),
@@ -275,10 +276,11 @@ async def maybe_secondary_research_guardrail_with_sealion(
         payload,
         "agent",
         reasoning_log_id=reasoning_log_id,
-        status="approved" if review.get("result") else "clarification_required",
+        status="dismissed" if decision == "blocked" else ("approved" if review.get("result") else "clarification_required"),
     )
     await store.create_edge(plan_node.id, node.id, "guarded_by")
-    await store.create_edge(node.id, local_guardrail_node.id, "reviewed_from")
+    edge_type = "blocked_research" if decision == "blocked" else "reviewed_from"
+    await store.create_edge(node.id, local_guardrail_node.id, edge_type)
     await store.append_reasoning_step(
         reasoning_log_id,
         {
@@ -286,10 +288,23 @@ async def maybe_secondary_research_guardrail_with_sealion(
             "guardrail_review_id": str(node.id),
             "configured": review.get("configured"),
             "model": review.get("model"),
-            "decision": "flag_only",
+            "decision": decision,
         },
     )
     return node
+
+
+def _classify_secondary_guardrail_decision(result: Any) -> str:
+    if not isinstance(result, dict):
+        return "approved"  # fail-open when sealion unparseable; primary guardrail still gated
+    risk_level = str(result.get("risk_level") or "").lower().strip()
+    if risk_level in {"block", "blocked", "critical", "high"}:
+        return "blocked"
+    if bool(result.get("medical_advice_risk")):
+        return "blocked"
+    if risk_level in {"medium", "moderate"} or bool(result.get("unsupported_eligibility_risk")) or result.get("concerns"):
+        return "flag_only"
+    return "approved"
 
 
 async def _sealion_chat_completion(settings: Settings, model: str, prompt: str, *, max_tokens: int, temperature: float) -> str:

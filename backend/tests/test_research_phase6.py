@@ -126,7 +126,7 @@ async def test_recommendation_notification_is_polling_visible_after_research_com
 
 
 @pytest.mark.asyncio
-async def test_sealion_secondary_research_guardrail_is_flag_only_and_does_not_block_search(monkeypatch):
+async def test_sealion_secondary_research_guardrail_flags_medium_risk_without_blocking(monkeypatch):
     captured = {}
 
     async def fake_guard(settings, *, prompt, response=None, max_tokens=300):
@@ -162,6 +162,44 @@ async def test_sealion_secondary_research_guardrail_is_flag_only_and_does_not_bl
     assert result["secondary_guardrail_review"]["payload"]["decision"] == "flag_only"
     assert len(result["research_results"]) >= 2
     assert adapter.queries
+
+
+@pytest.mark.asyncio
+async def test_sealion_secondary_research_guardrail_blocks_on_high_risk_before_fetch(monkeypatch):
+    async def fake_guard(settings, *, prompt, response=None, max_tokens=300):
+        return {
+            "provider": "sealion_guard",
+            "configured": True,
+            "model": settings.sealion_guard_model,
+            "result": {
+                "risk_level": "high",
+                "concerns": ["Plan implies unsupported medical advice."],
+                "medical_advice_risk": True,
+                "unsupported_eligibility_risk": True,
+                "notes": "Block.",
+            },
+        }
+
+    monkeypatch.setattr("app.sealion_reviews.sealion_guard_json_review", fake_guard)
+    store = MemoryGraphStore()
+    task = await _research_task_from_transcript(store)
+    adapter = FakeResearchAdapter()
+
+    result = await run_guarded_research_pipeline(
+        store,
+        task,
+        Settings(sealion_api_key="test-sealion"),
+        adapter,
+    )
+
+    assert result["secondary_guardrail_review"]["payload"]["decision"] == "blocked"
+    assert result["research_results"] == []
+    assert adapter.queries == []  # no external fetch
+    assert result["synthesized_recommendation"]["status"] == "dismissed"
+    updated_task = await store.get_node(task.id)
+    assert updated_task.payload["source_status"] == "blocked_by_sealion_guardrail"
+    plan = await store.get_node(UUID(result["research_plan"]["id"]))
+    assert plan.status == "dismissed"
 
 
 def test_research_task_endpoint_runs_guarded_pipeline(monkeypatch):

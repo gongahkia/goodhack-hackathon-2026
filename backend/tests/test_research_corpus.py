@@ -6,7 +6,7 @@ import pytest
 import app.research as research
 from app.config import Settings
 from app.data import grants_database, singapore_support_corpus
-from app.research import DefaultResearchToolAdapter, GuardrailReview, ResearchExtraction, ResearchQuestion, run_guarded_research_pipeline, synthesize_recommendation
+from app.research import DefaultResearchToolAdapter, ExtractionAttempt, GuardrailReview, ResearchExtraction, ResearchQuestion, run_guarded_research_pipeline, synthesize_recommendation
 from app.store import MemoryGraphStore
 
 
@@ -168,15 +168,18 @@ async def test_research_adapter_fetches_pages_and_synthesis_uses_extracted_detai
     async def fake_extract_pages(question, pages, settings):
         assert any("Applicants must be Singapore Citizens or Permanent Residents" in page["text"] for page in pages)
         return {
-            research._url_key(page["url"]): ResearchExtraction(
-                summary="The page explains mobility support eligibility and application requirements.",
-                verified_facts=["The support page describes an official mobility aid scheme."],
-                eligibility_criteria=["Applicants must be Singapore Citizens or Permanent Residents."],
-                support_amounts=["The page says subsidies may be capped for approved mobility devices."],
-                required_documents=["Prepare the application form, NRIC, and therapist assessment."],
-                application_steps=["Apply through an AIC-appointed assessor or ask the hospital medical social worker."],
-                extraction_provider="openai",
-                extraction_model=settings.openai_model,
+            research._page_source_key(page): ExtractionAttempt(
+                extraction=ResearchExtraction(
+                    summary="The page explains mobility support eligibility and application requirements.",
+                    relevance_status="relevant",
+                    verified_facts=["The support page describes an official mobility aid scheme."],
+                    eligibility_criteria=["Applicants must be Singapore Citizens or Permanent Residents."],
+                    support_amounts=["The page says subsidies may be capped for approved mobility devices."],
+                    required_documents=["Prepare the application form, NRIC, and therapist assessment."],
+                    application_steps=["Apply through an AIC-appointed assessor or ask the hospital medical social worker."],
+                    extraction_provider="openai",
+                    extraction_model=settings.openai_model,
+                )
             )
             for page in pages
         }

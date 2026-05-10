@@ -75,14 +75,12 @@ Judge-style critical audit. Completeness over ease. No sycophancy. File:line ref
 
 - **Doesn't exist as a type** (see structural gap above). Closest paths are caregiver clarifications (`main.py:219`) and research tasks.
 - **Last-writer-wins on clarifications** — no `If-Match`/version on `update_node_payload` (`store.py:394`).
-- **Reprocess race**: parallel `process_transcription` calls duplicate `pii_redaction` + downstream tasks because `_existing_processed_result` (`extraction.py:420`) only checks `extracted_entities` edge.
 - **No global dedup on transcript_id** for extraction outputs.
 
 ### Remedies
 
 - Add `ad_hoc_event` node + extraction branch detecting non-clinical one-offs (gift, visit, errand) w/ low-confidence default and explicit caregiver confirmation.
 - Add `version` field on every node; `update_node_payload` requires matching `If-Match` header; 412 on mismatch.
-- Idempotency lock around transcript processing keyed `transcript:{id}`; `INSERT … ON CONFLICT DO NOTHING` on `pii_redaction(transcript_id)` w/ a uniqueness constraint.
 
 ---
 
@@ -93,7 +91,6 @@ Judge-style critical audit. Completeness over ease. No sycophancy. File:line ref
 - **No PDPA processing record** — `research.py` never calls `record_processing_activity`; consent purpose `research_task_processing` is never recorded or checked. `compliance.py:34` records only `audio_transcription`.
 - **Consent is write-only audit theatre** — no code path reads `consent_record` to *gate* processing; withdrawal triggers no purge.
 - **Guardrail is keyword-substring** (`research.py:248`) — adversarial prompt containing "research/grant/wheelchair" passes even when intent is daily-task. No semantic guard.
-- **Two-stage Sealion guardrail is illusory** — `research.py:163` runs *after* primary approval and after edges/nodes are created; "block" decision arrives post-fact.
 - **PII leakage to OpenAI** — `PiiRedactor()` instantiated w/o patient seed (`research.py:501`); only regex catches NRIC/email/phone. Patient/relative names in scraped page text ship verbatim. PDPA: third-party data w/ no legal basis.
 - **No URL allow-list re-validation** — provider may return out-of-domain URLs; `research.py` trusts hostnames without re-checking against `domains` allow-list.
 - **Source-tier dedup collision** — `_url_key` `endswith` matching (`research.py:597`) collides unrelated `/apply` paths across hosts.
@@ -108,7 +105,6 @@ Judge-style critical audit. Completeness over ease. No sycophancy. File:line ref
 
 - Wrap `run_guarded_research_pipeline` w/ `record_consent` precondition check + `record_processing_activity("research_task_processing")`. Refuse if no granted consent; on withdrawal, hard-purge research nodes + edges.
 - Replace keyword guardrail w/ LLM classifier (Sealion *primary*, before plan execution) returning `{is_research, is_daily_task_misclassified, contains_third_party_phi}`. Run *before* any node creation; persist verdict.
-- Move Sealion review *before* fetch; `audit_research_plan` becomes 2-of-2 gate. On block, no edges/nodes created.
 - Seed `PiiRedactor` w/ `Patient` model + caregiver name + extracted relatives; enable `contextual_person_names`. Redact at fetch time, not just at LLM-payload time.
 - Re-validate every returned URL against `RESEARCH_DOMAIN_ALLOWLIST` post-search; drop+log mismatches.
 - Replace `endswith` dedup w/ canonical URL hash (`hashlib.sha256(scheme+host+path+sorted_query)`).

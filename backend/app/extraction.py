@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
@@ -322,6 +323,19 @@ async def process_redacted_transcript(
     settings: Settings | None = None,
 ) -> dict[str, Any]:
     existing = await _existing_processed_result(store, redaction)
+    if existing:
+        return existing
+
+    lock_key = f"extract:{redaction.id}"  # idempotency for concurrent reprocess
+    if not await store.acquire_system_lock(lock_key, ttl_seconds=180):
+        for _ in range(60):  # poll ~120s for in-flight peer
+            await asyncio.sleep(2)
+            existing = await _existing_processed_result(store, redaction)
+            if existing:
+                return existing
+        raise RuntimeError(f"timed out waiting for in-flight extraction of redaction {redaction.id}")
+
+    existing = await _existing_processed_result(store, redaction)  # double-check under lock
     if existing:
         return existing
 
