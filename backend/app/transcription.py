@@ -44,12 +44,21 @@ LANGUAGE_ALIASES = {
     "bahasa": "ms",
     "bahasa melayu": "ms",
     "bahasa malaysia": "ms",
+    "melayu": "ms",
+    "msa": "ms",
     "tamil": "ta",
+    "தமிழ்": "ta",
     "mandarin": "zh",
     "chinese": "zh",
     "mandarin chinese": "zh",
     "simplified chinese": "zh",
+    "cmn": "zh",
+    "zh-hans": "zh",
+    "中文": "zh",
+    "华语": "zh",
+    "普通话": "zh",
     "thai": "th",
+    "ภาษาไทย": "th",
 }
 
 
@@ -414,14 +423,16 @@ def language_label(language: str | None) -> str | None:
 
 
 def transcription_prompt(language: str | None) -> str | None:
+    if language == "en":
+        return "Transcribe Singapore caregiver English. Preserve medication names, dates, times, clinic names, and agencies such as AIC, CPF, MSF, and SG Enable exactly."
     if language == "zh":
-        return "Transcribe Mandarin Chinese using Simplified Chinese characters. Preserve medication names, dates, and clinic names exactly."
+        return "Transcribe Mandarin Chinese using Simplified Chinese characters. Preserve medication names, dates, times, clinic names, and Singapore agencies such as AIC, CPF, MSF, and SG Enable exactly."
     if language == "ms":
-        return "Transcribe Malay/Bahasa caregiver speech. Preserve medication names, dates, and clinic names exactly."
+        return "Transcribe Malay/Bahasa caregiver speech. Preserve medication names, dates, times, clinic names, and Singapore agencies such as AIC, CPF, MSF, and SG Enable exactly."
     if language == "ta":
-        return "Transcribe Tamil caregiver speech in Tamil script. Preserve medication names, dates, and clinic names exactly."
+        return "Transcribe Tamil caregiver speech in Tamil script. Preserve medication names, dates, times, clinic names, and Singapore agencies such as AIC, CPF, MSF, and SG Enable exactly."
     if language == "th":
-        return "Transcribe Thai caregiver speech in Thai script. Preserve medication names, dates, and clinic names exactly."
+        return "Transcribe Thai caregiver speech in Thai script. Preserve medication names, dates, times, clinic names, and Singapore agencies such as AIC, CPF, MSF, and SG Enable exactly."
     return None
 
 

@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from .config import Settings
+from .config import PATIENT_TZ, PATIENT_TZ_NAME, Settings
 from .models import Node
 from .privacy import rehydrate_placeholders
 from .sealion_reviews import maybe_localize_artifacts_with_sealion, maybe_review_extraction_with_sealion
@@ -43,6 +43,7 @@ class ExtractedTimeExpression(BaseModel):
     normalized_date: str | None = None
     normalized_time_window: str | None = None
     confidence: float = Field(ge=0, le=1)
+    year_inferred: bool = False  # true when year was rolled to next year due to past-date silently
 
 
 class ExtractedRecurrence(BaseModel):
@@ -57,6 +58,8 @@ class ExtractedAppointment(BaseModel):
     time: str | None = None
     location: str | None = None
     requires_calendar_write: bool = False
+    year_inferred: bool = False  # true when date's year was silently rolled
+    requires_clarification: bool = False  # true when year_inferred or time missing
 
 
 class ExtractedActionable(BaseModel):
@@ -123,64 +126,92 @@ APPOINTMENT_CUES = ("appointment", "visit", "review", "see the doctor", "physio"
 BODY_PARTS = ("knee", "leg", "foot", "ankle", "hand", "arm", "eye", "heart", "kidney")
 CONDITIONS = ("diabetes", "high blood sugar", "parkinson", "dementia", "stroke", "hypertension")
 NATIVE_DAILY_CUES = {
-    "ms": ("setiap hari", "tiap hari", "harian"),
-    "ta": ("தினமும்", "ஒவ்வொரு நாளும்"),
-    "zh": ("每天", "每日"),
-    "th": ("ทุกวัน",),
+    "ms": ("setiap hari", "tiap hari", "tiap-tiap hari", "harian", "setiap pagi", "setiap malam"),
+    "ta": ("தினமும்", "தினசரி", "ஒவ்வொரு நாளும்", "நாள் தோறும்"),
+    "zh": ("每天", "每日", "天天", "每早", "每晚"),
+    "th": ("ทุกวัน", "วันละ", "เป็นประจำ"),
 }
 NATIVE_MEAL_TIMING = {
     "ms": {
         "sebelum sarapan": "before breakfast",
         "selepas sarapan": "after breakfast",
+        "sebelum makan pagi": "before breakfast",
+        "selepas makan pagi": "after breakfast",
         "sebelum makan tengah hari": "before lunch",
+        "sebelum makan tengahari": "before lunch",
+        "sebelum makan siang": "before lunch",
         "selepas makan tengah hari": "after lunch",
+        "selepas makan tengahari": "after lunch",
+        "selepas makan siang": "after lunch",
         "sebelum makan malam": "before dinner",
         "selepas makan malam": "after dinner",
+        "sebelum makan": "before food",
+        "selepas makan": "after food",
     },
     "ta": {
         "காலை உணவுக்கு முன்": "before breakfast",
         "காலை உணவுக்குப் பிறகு": "after breakfast",
+        "காலை சாப்பாட்டுக்கு முன்": "before breakfast",
+        "காலை சாப்பாட்டுக்குப் பிறகு": "after breakfast",
         "மதிய உணவுக்கு முன்": "before lunch",
         "மதிய உணவுக்குப் பிறகு": "after lunch",
+        "மதிய சாப்பாட்டுக்கு முன்": "before lunch",
+        "மதிய சாப்பாட்டுக்குப் பிறகு": "after lunch",
         "இரவு உணவுக்கு முன்": "before dinner",
         "இரவு உணவுக்குப் பிறகு": "after dinner",
+        "சாப்பாட்டுக்கு முன்": "before food",
+        "சாப்பாட்டுக்குப் பிறகு": "after food",
     },
     "zh": {
         "早餐前": "before breakfast",
         "早餐后": "after breakfast",
+        "早饭前": "before breakfast",
+        "早饭后": "after breakfast",
         "午餐前": "before lunch",
         "午餐后": "after lunch",
+        "午饭前": "before lunch",
+        "午饭后": "after lunch",
+        "中饭前": "before lunch",
+        "中饭后": "after lunch",
         "晚餐前": "before dinner",
         "晚餐后": "after dinner",
+        "晚饭前": "before dinner",
+        "晚饭后": "after dinner",
+        "饭前": "before food",
+        "饭后": "after food",
     },
     "th": {
         "ก่อนอาหารเช้า": "before breakfast",
         "หลังอาหารเช้า": "after breakfast",
         "ก่อนอาหารกลางวัน": "before lunch",
         "หลังอาหารกลางวัน": "after lunch",
+        "ก่อนมื้อกลางวัน": "before lunch",
+        "หลังมื้อกลางวัน": "after lunch",
         "ก่อนอาหารเย็น": "before dinner",
         "หลังอาหารเย็น": "after dinner",
         "ก่อนอาหารค่ำ": "before dinner",
         "หลังอาหารค่ำ": "after dinner",
+        "ก่อนกินข้าว": "before food",
+        "หลังกินข้าว": "after food",
     },
 }
 NATIVE_APPOINTMENT_CUES = {
-    "ms": ("temu janji", "jumpa doktor", "klinik", "fisioterapi", "fisio"),
-    "ta": ("மருத்துவர்", "கிளினிக்", "சந்திப்பு", "பிசியோ"),
-    "zh": ("预约", "复诊", "医生", "诊所", "物理治疗"),
-    "th": ("นัด", "พบแพทย์", "หมอ", "คลินิก", "กายภาพบำบัด", "แล็บ"),
+    "ms": ("temu janji", "temujanji", "jumpa doktor", "klinik", "hospital", "fisioterapi", "fisio", "rawatan"),
+    "ta": ("மருத்துவர்", "மருத்துவமனை", "கிளினிக்", "சந்திப்பு", "நியமனம்", "பிசியோ"),
+    "zh": ("预约", "复诊", "复查", "医生", "看医生", "诊所", "医院", "物理治疗", "理疗"),
+    "th": ("นัด", "นัดหมอ", "พบแพทย์", "พบหมอ", "หมอ", "แพทย์", "คลินิก", "โรงพยาบาล", "กายภาพบำบัด", "กายภาพ", "แล็บ", "ตรวจเลือด"),
 }
 NATIVE_RESEARCH_CUES = {
-    "ms": ("subsidi", "geran", "bantuan kewangan", "kerusi roda", "sokongan"),
-    "ta": ("மானியம்", "உதவி", "சக்கர நாற்காலி", "நிதி உதவி"),
-    "zh": ("补助", "津贴", "资助", "轮椅", "援助"),
-    "th": ("เงินอุดหนุน", "เงินช่วยเหลือ", "ทุน", "รถเข็น", "ความช่วยเหลือ"),
+    "ms": ("subsidi", "geran", "skim", "bantuan", "bantuan kewangan", "dana", "kerusi roda", "sokongan"),
+    "ta": ("மானியம்", "உதவி", "ஆதரவு", "சக்கர நாற்காலி", "நிதி", "நிதி உதவி", "உதவித்தொகை"),
+    "zh": ("补助", "津贴", "资助", "政府补贴", "轮椅", "援助", "经济援助", "辅助器具"),
+    "th": ("เงินอุดหนุน", "เงินช่วยเหลือ", "ทุน", "สวัสดิการ", "รถเข็น", "ความช่วยเหลือ", "การสนับสนุน"),
 }
 NATIVE_WARNING_CUES = {
-    "ms": ("doktor kata", "mungkin perlu", "risiko"),
-    "ta": ("மருத்துவர் சொன்னார்", "தேவைப்படலாம்", "ஆபத்து"),
-    "zh": ("医生说", "可能需要", "风险"),
-    "th": ("หมอบอก", "อาจต้อง", "ความเสี่ยง"),
+    "ms": ("doktor kata", "doktor cakap", "kata doktor", "mungkin perlu", "mungkin memerlukan", "risiko"),
+    "ta": ("மருத்துவர் சொன்னார்", "மருத்துவர் கூறினார்", "தேவைப்படலாம்", "வேண்டியிருக்கும்", "ஆபத்து"),
+    "zh": ("医生说", "医生讲", "医生建议", "可能需要", "也许需要", "风险"),
+    "th": ("หมอบอก", "แพทย์บอก", "อาจต้อง", "อาจจำเป็น", "ความเสี่ยง", "เสี่ยง"),
 }
 
 
@@ -189,7 +220,7 @@ def extract_entities_from_redaction(redaction: Node, reference_date: date | None
         raise ValueError("Can only extract entities from pii_redaction nodes")
     text = str(redaction.payload.get("redacted_text") or "")
     placeholder_map = _placeholder_map(redaction)
-    today = reference_date or datetime.now(UTC).date()
+    today = reference_date or datetime.now(PATIENT_TZ).date()  # patient-day boundary, not utc
     language = str(redaction.payload.get("detected_language") or redaction.payload.get("requested_language") or redaction.payload.get("original_language") or "")
 
     entities = _extract_entities_from_text(text, placeholder_map, today)
@@ -229,7 +260,7 @@ def _extract_native_entities(text: str, language: str, placeholder_map: dict[str
             if placeholder.startswith(("PERSON_", "PATIENT_", "CAREGIVER_"))
         ],
         medications=_extract_native_medications(text, language),
-        time_expressions=_extract_native_time_expressions(text, today),
+        time_expressions=_extract_native_time_expressions(text, language, today),
         recurrences=_extract_native_recurrences(text, language, today),
         appointments=[],
         actionables=[],
@@ -523,11 +554,11 @@ def _extract_time_expressions(text: str, today: date) -> list[ExtractedTimeExpre
     elif "tomorrow" in lowered:
         expressions.append(ExtractedTimeExpression(raw_text="tomorrow", normalized_date=(today + timedelta(days=1)).isoformat(), confidence=0.85))
     for match in re.finditer(r"\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\b", text, re.IGNORECASE):
-        normalized = _normalize_day_month(match.group(1), match.group(2), today)
-        expressions.append(ExtractedTimeExpression(raw_text=match.group(0), normalized_date=normalized, confidence=0.8))
+        normalized, year_inferred = _normalize_day_month(match.group(1), match.group(2), today)
+        expressions.append(ExtractedTimeExpression(raw_text=match.group(0), normalized_date=normalized, confidence=0.5 if year_inferred else 0.8, year_inferred=year_inferred))
     for match in re.finditer(r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b", text, re.IGNORECASE):
-        normalized = _normalize_month_day(match.group(1), match.group(2), match.group(3), today)
-        expressions.append(ExtractedTimeExpression(raw_text=match.group(0), normalized_date=normalized, confidence=0.85 if match.group(3) else 0.8))
+        normalized, year_inferred = _normalize_month_day(match.group(1), match.group(2), match.group(3), today)
+        expressions.append(ExtractedTimeExpression(raw_text=match.group(0), normalized_date=normalized, confidence=0.5 if year_inferred else (0.85 if match.group(3) else 0.8), year_inferred=year_inferred))
     for match in re.finditer(r"\b(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", text, re.IGNORECASE):
         expressions.append(ExtractedTimeExpression(raw_text=match.group(0), normalized_time_window=_normalize_time(match), confidence=0.85))
     return expressions
@@ -554,9 +585,20 @@ def _extract_appointments(text: str, today: date) -> list[ExtractedAppointment]:
         kind = "lab"
     elif "doctor" in lowered or "dr" in lowered:
         kind = "doctor"
-    date_value = next((item.normalized_date for item in _extract_time_expressions(text, today) if item.normalized_date), None)
-    time_value = next((item.normalized_time_window for item in _extract_time_expressions(text, today) if item.normalized_time_window and re.match(r"^\d{2}:\d{2}$", item.normalized_time_window)), None)
-    return [ExtractedAppointment(kind=kind, date=date_value, time=time_value, requires_calendar_write=bool(date_value))]
+    expressions = _extract_time_expressions(text, today)
+    date_expr = next((item for item in expressions if item.normalized_date), None)
+    date_value = date_expr.normalized_date if date_expr else None
+    year_inferred = bool(date_expr and date_expr.year_inferred)
+    time_value = next((item.normalized_time_window for item in expressions if item.normalized_time_window and re.match(r"^\d{2}:\d{2}$", item.normalized_time_window)), None)
+    needs_clarification = year_inferred or (bool(date_value) and not time_value)
+    return [ExtractedAppointment(
+        kind=kind,
+        date=date_value,
+        time=time_value,
+        requires_calendar_write=bool(date_value) and not year_inferred and bool(time_value),
+        year_inferred=year_inferred,
+        requires_clarification=needs_clarification,
+    )]
 
 
 def _extract_medical_context(text: str) -> ExtractedMedicalContext:
@@ -632,8 +674,11 @@ def _extract_native_medications(text: str, language: str) -> list[ExtractedMedic
     return medications
 
 
-def _extract_native_time_expressions(text: str, today: date) -> list[ExtractedTimeExpression]:
+def _extract_native_time_expressions(text: str, language: str, today: date) -> list[ExtractedTimeExpression]:
     expressions = _extract_time_expressions(text, today)
+    tomorrow_cue = _native_tomorrow_cue(text, language)
+    if tomorrow_cue:
+        expressions.append(ExtractedTimeExpression(raw_text=tomorrow_cue, normalized_date=(today + timedelta(days=1)).isoformat(), confidence=0.85))
     for match in re.finditer(r"\b(\d{4})-(\d{2})-(\d{2})\b", text):
         candidate = _safe_date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
         if candidate:
@@ -650,11 +695,19 @@ def _extract_native_time_expressions(text: str, today: date) -> list[ExtractedTi
         candidate = _safe_date(year, month, day)
         if not candidate:
             continue
+        year_inferred = False
         if not match.group(3) and candidate < today:
             candidate = _safe_date(today.year + 1, month, day)
             if not candidate:
                 continue
-        expressions.append(ExtractedTimeExpression(raw_text=match.group(0), normalized_date=candidate.isoformat(), confidence=0.85))
+            year_inferred = True
+        expressions.append(ExtractedTimeExpression(raw_text=match.group(0), normalized_date=candidate.isoformat(), confidence=0.5 if year_inferred else 0.85, year_inferred=year_inferred))
+    for match in re.finditer(r"(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日", text):
+        candidate = _safe_date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        if candidate:
+            expressions.append(ExtractedTimeExpression(raw_text=match.group(0), normalized_date=candidate.isoformat(), confidence=0.95))
+    for raw_text, normalized_time in _native_time_windows(text, language):
+        expressions.append(ExtractedTimeExpression(raw_text=raw_text, normalized_time_window=normalized_time, confidence=0.85))
     return expressions
 
 
@@ -682,9 +735,19 @@ def _extract_native_appointments(
         kind = "lab"
     elif any(cue in haystack for cue in ("doktor", "மருத்துவர்", "医生", "หมอ", "แพทย์")):
         kind = "doctor"
-    date_value = next((item.normalized_date for item in time_expressions if item.normalized_date), None)
+    date_expr = next((item for item in time_expressions if item.normalized_date), None)
+    date_value = date_expr.normalized_date if date_expr else None
+    year_inferred = bool(date_expr and date_expr.year_inferred)
     time_value = next((item.normalized_time_window for item in time_expressions if item.normalized_time_window and re.match(r"^\d{2}:\d{2}$", item.normalized_time_window)), None)
-    return [ExtractedAppointment(kind=kind, date=date_value, time=time_value, requires_calendar_write=bool(date_value))]
+    needs_clarification = year_inferred or (bool(date_value) and not time_value)
+    return [ExtractedAppointment(
+        kind=kind,
+        date=date_value,
+        time=time_value,
+        requires_calendar_write=bool(date_value) and not year_inferred and bool(time_value),
+        year_inferred=year_inferred,
+        requires_clarification=needs_clarification,
+    )]
 
 
 def _extract_native_medical_context(text: str, language: str) -> ExtractedMedicalContext:
@@ -770,6 +833,7 @@ async def _create_daily_task(
         "medication": medication.model_dump(mode="json") if medication else None,
         "recurrence": entities.recurrences[0].pattern if entities.recurrences else None,
         "timing_relation": medication.timing_relation if medication else _timing_relation(actionable.description),
+        "timezone": PATIENT_TZ_NAME,  # explicit task tz; caregiver travel safety
         "requires_user_review": bool(entities.clarifications_needed),
     }
     node = await store.create_node("daily_task", payload, "agent", reasoning_log_id=reasoning_log_id, status="pending_review")
@@ -812,6 +876,17 @@ async def _create_appointment_candidate(
     reasoning_log_id,
 ) -> Node:
     title = f"{appointment.kind.title()} appointment"
+    if appointment.requires_calendar_write:
+        calendar_write_status = "pending_user_approval"
+    elif appointment.requires_clarification:
+        calendar_write_status = "needs_clarification"
+    else:
+        calendar_write_status = "not_required"
+    clarification_reasons: list[str] = []
+    if appointment.year_inferred:
+        clarification_reasons.append("year_silently_rolled")
+    if appointment.date and not appointment.time:
+        clarification_reasons.append("time_missing")
     payload = {
         "patient_id": patient_id,
         "title": rehydrate_placeholders(title, placeholder_map),
@@ -820,9 +895,13 @@ async def _create_appointment_candidate(
         "time": appointment.time,
         "location": appointment.location,
         "requires_calendar_write": appointment.requires_calendar_write,
-        "calendar_write_status": "pending_user_approval" if appointment.requires_calendar_write else "not_required",
+        "year_inferred": appointment.year_inferred,
+        "requires_clarification": appointment.requires_clarification,
+        "clarification_reasons": clarification_reasons,
+        "calendar_write_status": calendar_write_status,
     }
-    node = await store.create_node("appointment_candidate", payload, "agent", reasoning_log_id=reasoning_log_id, status="pending_review")
+    node_status = "clarification_required" if appointment.requires_clarification else "pending_review"
+    node = await store.create_node("appointment_candidate", payload, "agent", reasoning_log_id=reasoning_log_id, status=node_status)
     await store.create_edge(node.id, triage_node.id, "classified_as")
     return node
 
@@ -855,29 +934,33 @@ def _timing_relation(text: str) -> str | None:
     return None
 
 
-def _normalize_day_month(day: str, month: str, today: date) -> str | None:
+def _normalize_day_month(day: str, month: str, today: date) -> tuple[str | None, bool]:
     month_num = datetime.strptime(month[:3].title(), "%b").month
     candidate = _safe_date(today.year, month_num, int(day))
     if not candidate:
-        return None
+        return None, False
+    inferred = False
     if candidate < today:
         candidate = _safe_date(today.year + 1, month_num, int(day))
         if not candidate:
-            return None
-    return candidate.isoformat()
+            return None, False
+        inferred = True
+    return candidate.isoformat(), inferred
 
 
-def _normalize_month_day(month: str, day: str, year: str | None, today: date) -> str | None:
+def _normalize_month_day(month: str, day: str, year: str | None, today: date) -> tuple[str | None, bool]:
     month_num = datetime.strptime(month[:3].title(), "%b").month
     candidate_year = int(year) if year else today.year
     candidate = _safe_date(candidate_year, month_num, int(day))
     if not candidate:
-        return None
+        return None, False
+    inferred = False
     if not year and candidate < today:
         candidate = _safe_date(today.year + 1, month_num, int(day))
         if not candidate:
-            return None
-    return candidate.isoformat()
+            return None, False
+        inferred = True
+    return candidate.isoformat(), inferred
 
 
 def _normalize_time(match: re.Match[str]) -> str | None:

@@ -7,13 +7,13 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from .config import Settings
+from .config import PATIENT_TZ, Settings
 from .models import Node
 from .security import vendor_allowed
 from .store import GraphStore
 
 
-SINGAPORE_TZ = ZoneInfo("Asia/Singapore")
+SINGAPORE_TZ = PATIENT_TZ  # backwards-compat alias
 DEFAULT_MEAL_TIMES = {"breakfast": "08:00", "lunch": "12:00", "dinner": "18:00"}
 MIN_THREE_TIMES_DAILY_SPACING_MINUTES = 4 * 60
 
@@ -210,8 +210,19 @@ def _candidate_time_for_task(task: Node, target_date: date) -> tuple[datetime, d
     else:
         return None
     duration = int(payload.get("estimated_duration_minutes") or payload.get("estimated_effort_minutes") or 15)
-    start_at = datetime.combine(target_date, start_time, tzinfo=SINGAPORE_TZ)
+    start_at = datetime.combine(target_date, start_time, tzinfo=_task_tz(payload))
     return start_at, start_at + timedelta(minutes=max(5, min(duration, 240)))
+
+
+def _task_tz(payload: dict[str, Any]):
+    override = payload.get("user_override") if isinstance(payload.get("user_override"), dict) else None
+    name = (override.get("timezone") if override else None) or payload.get("timezone")
+    if name:
+        try:
+            return ZoneInfo(str(name))
+        except Exception:
+            pass
+    return SINGAPORE_TZ
 
 
 def _medication_spacing_conflict(task: Node, target_date: date) -> dict[str, Any] | None:

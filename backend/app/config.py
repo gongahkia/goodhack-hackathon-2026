@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -7,6 +8,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
+PATIENT_TZ_NAME = "Asia/Singapore"  # single source of truth for patient-day boundaries
+PATIENT_TZ = ZoneInfo(PATIENT_TZ_NAME)
 
 
 class Settings(BaseSettings):

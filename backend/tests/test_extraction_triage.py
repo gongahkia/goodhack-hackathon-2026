@@ -91,7 +91,10 @@ async def test_transcript_can_create_daily_research_and_appointment_buckets_with
     assert appointment["kind"] == "physio"
     assert appointment["date"] == "2027-01-28"
     assert appointment["time"] == "10:00"
-    assert appointment["calendar_write_status"] == "pending_user_approval"
+    assert appointment["year_inferred"] is True  # 28 Jan from May 2026 reference rolls to 2027 silently
+    assert appointment["requires_clarification"] is True
+    assert appointment["requires_calendar_write"] is False  # gated until user confirms year
+    assert appointment["calendar_write_status"] == "needs_clarification"
 
 
 @pytest.mark.asyncio

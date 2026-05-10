@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from typing import Any, Protocol
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -46,7 +47,7 @@ async def update_daily_task(
 ) -> dict[str, Any]:
     if task.type != "daily_task" or task.payload.get("patient_id") != patient_id:
         raise ValueError("Daily task not found")
-    allowed = {"title", "description", "scheduled_time", "timing_relation", "scheduling_semantics", "reason", "meal_times"}
+    allowed = {"title", "description", "scheduled_time", "timing_relation", "scheduling_semantics", "reason", "meal_times", "timezone"}
     unsupported = sorted(set(patch) - allowed)
     if unsupported:
         raise ValueError(f"Unsupported daily task field(s): {', '.join(unsupported)}")
@@ -56,7 +57,7 @@ async def update_daily_task(
         **(task.payload.get("user_override") if isinstance(task.payload.get("user_override"), dict) else {}),
         "updated_at": datetime.now(UTC).isoformat(),
     }
-    for key in ["scheduled_time", "timing_relation", "scheduling_semantics", "reason", "meal_times"]:
+    for key in ["scheduled_time", "timing_relation", "scheduling_semantics", "reason", "meal_times", "timezone"]:
         if key in patch:
             override[key] = patch[key]
     payload_patch: dict[str, Any] = {"user_override": override}
@@ -93,12 +94,17 @@ async def approve_appointment_calendar_write(
 ) -> dict[str, Any]:
     if appointment.type != "appointment_candidate" or appointment.payload.get("patient_id") != patient_id:
         raise ValueError("Appointment candidate not found")
+    if appointment.payload.get("calendar_write_status") == "written" or appointment.payload.get("google_event_id"):
+        raise ValueError("Appointment candidate has already been written to calendar")
     if not appointment.payload.get("requires_calendar_write"):
         raise ValueError("Appointment candidate does not require calendar write")
     if not appointment.payload.get("date"):
         raise ValueError("Appointment candidate needs a date before calendar write")
-    if appointment.payload.get("calendar_write_status") == "written" or appointment.payload.get("google_event_id"):
-        raise ValueError("Appointment candidate has already been written to calendar")
+    if not appointment.payload.get("time"):
+        raise ValueError("Appointment candidate needs a clarified time before calendar write")
+    if appointment.payload.get("requires_clarification"):
+        reasons = appointment.payload.get("clarification_reasons") or []
+        raise ValueError(f"Appointment candidate needs clarification before calendar write: {', '.join(reasons) or 'see clarification_reasons'}")
 
     decision = await store.create_node(
         "user_decision",
@@ -190,8 +196,10 @@ def _event_payload_from_appointment(appointment: Node) -> dict[str, Any]:
 
 def _appointment_start(payload: dict[str, Any]) -> datetime:
     date_value = str(payload["date"])
-    time_value = str(payload.get("time") or "09:00")
-    return datetime.combine(datetime.fromisoformat(date_value).date(), time.fromisoformat(time_value), tzinfo=SINGAPORE_TZ)
+    time_value = payload.get("time")
+    if not time_value:
+        raise ValueError("Appointment candidate has no clarified time; refusing to default")
+    return datetime.combine(datetime.fromisoformat(date_value).date(), time.fromisoformat(str(time_value)), tzinfo=SINGAPORE_TZ)
 
 
 def _validate_daily_task_patch(patch: dict[str, Any]) -> None:
@@ -199,6 +207,11 @@ def _validate_daily_task_patch(patch: dict[str, Any]) -> None:
         raise ValueError(f"scheduling_semantics must be one of: {', '.join(sorted(VALID_SCHEDULING_SEMANTICS))}")
     if "scheduled_time" in patch and patch["scheduled_time"] is not None:
         _parse_hhmm(str(patch["scheduled_time"]), "scheduled_time")
+    if "timezone" in patch and patch["timezone"] is not None:
+        try:
+            ZoneInfo(str(patch["timezone"]))
+        except Exception as exc:
+            raise ValueError(f"timezone must be a valid IANA name: {exc}") from exc
     if "meal_times" in patch:
         meal_times = patch["meal_times"]
         if meal_times is not None and not isinstance(meal_times, dict):
