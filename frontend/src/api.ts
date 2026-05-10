@@ -9,6 +9,7 @@ export interface BackendNode {
 export interface CreateTranscriptionResponse {
   transcription_session: BackendNode
   transcript: BackendNode
+  display_transcript?: string
 }
 
 export interface ProcessTranscriptionResponse {
@@ -79,7 +80,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export function createTranscription(audio: Blob, language = 'en') {
-  return request<CreateTranscriptionResponse>(`/transcriptions?language=${encodeURIComponent(language)}`, {
+  return request<CreateTranscriptionResponse>(`/transcriptions?language=${encodeURIComponent(language)}&include_display_text=true`, {
     method: 'POST',
     body: audio,
     headers: { 'Content-Type': audio.type || 'audio/webm' },

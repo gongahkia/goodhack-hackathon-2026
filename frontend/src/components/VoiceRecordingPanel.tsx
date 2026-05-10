@@ -21,7 +21,7 @@ type SpeechRecognitionLike = {
   interimResults: boolean
   lang: string
   onresult: ((event: SpeechRecognitionEventLike) => void) | null
-  onerror: (() => void) | null
+  onerror: ((event: { error?: string }) => void) | null
   start: () => void
   stop: () => void
   abort?: () => void
@@ -56,6 +56,7 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [transcriptId, setTranscriptId] = useState<string | undefined>()
   const [error, setError] = useState<string | null>(null)
+  const [speechNotice, setSpeechNotice] = useState<string | null>(null)
   const [reviewing, setReviewing] = useState(false)
   const transcriptRef = useRef<HTMLDivElement>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
@@ -73,6 +74,7 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
     setSessionId(null)
     setTranscriptId(undefined)
     setError(null)
+    setSpeechNotice(null)
     setReviewing(false)
     chunksRef.current = []
     finalSpeechRef.current = ''
@@ -104,7 +106,9 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
         if (!cancelledRef.current) void uploadRecording(recorder.mimeType || 'audio/webm')
       }
       recorder.start()
-      startSpeechTranscript()
+      if (!startSpeechTranscript()) {
+        setSpeechNotice('Live transcript unavailable in this browser. Backend transcript will appear after stop.')
+      }
     } catch (captureError) {
       setError(captureError instanceof Error ? captureError.message : 'Microphone capture failed')
       setPhase('done')
@@ -113,7 +117,7 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
 
   function startSpeechTranscript() {
     const Ctor = speechCtor()
-    if (!Ctor) return
+    if (!Ctor) return false
     try {
       const recognition = new Ctor()
       recognition.continuous = true
@@ -128,11 +132,15 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
         }
         setTranscript(`${finalSpeechRef.current}${interim}`.trim())
       }
-      recognition.onerror = () => undefined
+      recognition.onerror = event => {
+        setSpeechNotice(`Live transcript unavailable${event.error ? ` (${event.error})` : ''}. Backend transcript will appear after stop.`)
+      }
       recognition.start()
       recognitionRef.current = recognition
+      return true
     } catch {
       recognitionRef.current = null
+      return false
     }
   }
 
@@ -151,6 +159,7 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
       const result = await createTranscription(audio, 'en')
       setSessionId(result.transcription_session.id)
       setTranscriptId(result.transcript?.id)
+      if (result.display_transcript?.trim()) setTranscript(result.display_transcript.trim())
       setPhase('done')
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : 'Audio upload failed')
@@ -175,15 +184,18 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
   async function reviewPlan() {
     if (!sessionId) return
     setReviewing(true)
-    await onComplete({ transcriptionSessionId: sessionId, transcriptId, displayTranscript: transcript })
-    setReviewing(false)
+    try {
+      await onComplete({ transcriptionSessionId: sessionId, transcriptId, displayTranscript: transcript })
+    } finally {
+      setReviewing(false)
+    }
   }
 
   const fmt = (s: number) =>
     `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
 
   const isActive = phase === 'recording'
-  const displayText = error || transcript || (isActive ? 'Listening...' : 'Audio captured. Backend transcription is being prepared.')
+  const displayText = error || transcript || (isActive ? speechNotice || 'Listening...' : 'Backend transcription finished, but no display transcript was returned.')
 
   return (
     <>
@@ -293,7 +305,10 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
               borderRadius: 2,
               background: isActive ? colors.statusUrgent : colors.primary,
               opacity: isActive ? 0.7 + h * 0.3 : 0.25 + h * 0.35,
-              animation: isActive ? `w${i % 5} ${0.65 + (i % 4) * 0.10}s ease-in-out infinite` : 'none',
+              animationName: isActive ? `w${i % 5}` : 'none',
+              animationDuration: `${0.65 + (i % 4) * 0.10}s`,
+              animationTimingFunction: 'ease-in-out',
+              animationIterationCount: 'infinite',
               animationDelay: `${(i * 0.048).toFixed(2)}s`,
               transformOrigin: 'center',
               transition: 'background 0.5s ease, opacity 0.5s ease',

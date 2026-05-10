@@ -312,11 +312,20 @@ async def transcribe(request: Request, language: str | None = Query(default=None
 
 
 @app.post("/transcriptions", dependencies=[Depends(require_write_access)])
-async def create_transcription(request: Request, language: str | None = Query(default=None)) -> dict:
+async def create_transcription(
+    request: Request,
+    language: str | None = Query(default=None),
+    include_display_text: bool = Query(default=False),
+) -> dict:
     rate_limiter.check(rate_limit_key(request, "transcriptions"), settings.transcription_rate_limit, 3600)
     try:
         request_settings = transcription_settings_for_language(language)
-        result = await _create_transcription_from_audio(await request.body(), request.headers.get("content-type"), request_settings)
+        result = await _create_transcription_from_audio(
+            await request.body(),
+            request.headers.get("content-type"),
+            request_settings,
+            include_display_text=include_display_text,
+        )
         return sanitize_public(result)
     except TranscriptionInputError as exc:
         raise HTTPException(422 if "Unsupported transcription language" in str(exc) else exc.status_code, str(exc)) from exc
@@ -420,7 +429,7 @@ async def live_transcription(
         await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
 
 
-async def _create_transcription_from_audio(audio: bytes, content_type: str | None, request_settings) -> dict:
+async def _create_transcription_from_audio(audio: bytes, content_type: str | None, request_settings, include_display_text: bool = False) -> dict:
     await record_consent(store, PATIENT_ID, "audio_transcription")
     result = await ingest_audio_transcription(store, PATIENT_ID, audio, content_type, request_settings)
     transcript_id = result.get("transcript", {}).get("id")
@@ -433,6 +442,10 @@ async def _create_transcription_from_audio(audio: bytes, content_type: str | Non
         request_settings.transcription_provider,
         "provider_default",
     )
+    if include_display_text:
+        payload = result.get("transcript", {}).get("payload", {})
+        if isinstance(payload, dict):
+            result["display_transcript"] = payload.get("normalized_english_text") or payload.get("raw_text") or ""
     return result
 
 
