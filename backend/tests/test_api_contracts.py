@@ -151,6 +151,33 @@ def test_transcript_first_api_flow_is_idempotent_and_preserves_user_facing_pii(m
     assert len(asyncio.run(store.list_nodes("mdm-tan", ["appointment_candidate"]))) == 1
 
 
+def test_transcription_can_return_ephemeral_display_text_without_unredacting_stored_payload(monkeypatch):
+    _install_test_app(monkeypatch)
+
+    async def fake_transcribe_audio(audio, content_type, settings):
+        return TranscriptionResult(
+            text="Display this consultation transcript.",
+            provider="openai",
+            model="gpt-4o-transcribe",
+            language="en",
+        )
+
+    monkeypatch.setattr(transcript_pipeline, "transcribe_audio", fake_transcribe_audio)
+
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/transcriptions?language=en&include_display_text=true",
+            content=b"fake wav bytes",
+            headers={**_headers(), "Content-Type": "audio/wav"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["display_transcript"] == "Display this consultation transcript."
+    assert body["transcript"]["payload"]["raw_text"] == "[redacted]"
+    assert body["transcript"]["payload"]["normalized_english_text"] == "[redacted]"
+
+
 def test_daily_task_edit_route_validates_overrides_and_records_feedback(monkeypatch):
     store = _install_test_app(monkeypatch)
 
