@@ -1,22 +1,25 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import subprocess
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from dotenv import load_dotenv
 
 import app.main as main
 import app.transcript_pipeline as transcript_pipeline
 from app.config import Settings
 from app.quality import transcript_quality
 from app.scheduler import SINGAPORE_TZ
+from app.security import RAW_DATA_REDACTION
 from app.sealion_reviews import sealion_guard_json_review, sealion_regional_json_review
 from app.store import MemoryGraphStore, PostgresGraphStore
 from app.transcription import transcribe_audio
@@ -24,6 +27,10 @@ from app.v2 import tinyfish_search_web
 
 
 pytestmark = pytest.mark.integration
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(REPO_ROOT / ".env")
+load_dotenv(REPO_ROOT / "backend" / ".env", override=True)
 
 
 def _live_enabled(name: str) -> bool:
@@ -51,9 +58,10 @@ requires_live_external_e2e = pytest.mark.skipif(
         _live_enabled("RUN_LIVE_EXTERNAL_E2E")
         and os.getenv("OPENAI_API_KEY")
         and os.getenv("GOOGLE_CALENDAR_ACCESS_TOKEN")
+        and os.getenv("SEALION_API_KEY")
         and (os.getenv("TINYFISH_API_KEY") or os.getenv("EXA_API_KEY"))
     ),
-    reason="set RUN_LIVE_EXTERNAL_E2E=1, OPENAI_API_KEY, GOOGLE_CALENDAR_ACCESS_TOKEN, and TINYFISH_API_KEY or EXA_API_KEY",
+    reason="set RUN_LIVE_EXTERNAL_E2E=1, OPENAI_API_KEY, GOOGLE_CALENDAR_ACCESS_TOKEN, SEALION_API_KEY, and TINYFISH_API_KEY or EXA_API_KEY",
 )
 
 
@@ -166,8 +174,8 @@ def test_live_external_provider_full_api_e2e(monkeypatch):
         openai_transcription_model=os.getenv("OPENAI_TRANSCRIPTION_MODEL", "gpt-4o-transcribe"),
         tinyfish_api_key=os.getenv("TINYFISH_API_KEY"),
         exa_api_key=os.getenv("EXA_API_KEY"),
-        sealion_api_key=None,
-        sealion_transcript_review_enabled=False,
+        sealion_api_key=os.environ["SEALION_API_KEY"],
+        sealion_transcript_review_enabled=True,
         live_search_llm_verification=False,
         google_calendar_access_token=access_token,
         google_calendar_id=calendar_id,
@@ -195,7 +203,11 @@ def test_live_external_provider_full_api_e2e(monkeypatch):
                 headers={**headers, "Content-Type": content_type},
             )
             assert created.status_code == 200, created.text
-            transcript_text = created.json()["transcript"]["payload"]["raw_text"]
+            transcript_body = created.json()["transcript"]
+            assert transcript_body["payload"]["raw_text"] == RAW_DATA_REDACTION
+            transcript_node = asyncio.run(store.get_node(UUID(transcript_body["id"])))
+            assert transcript_node is not None, transcript_body
+            transcript_text = transcript_node.payload["raw_text"]
             assert _contains_core_terms(transcript_text), {"expected": expected_text, "actual": transcript_text}
 
             session_id = created.json()["transcription_session"]["id"]
@@ -205,6 +217,7 @@ def test_live_external_provider_full_api_e2e(monkeypatch):
             assert body["daily_tasks"], body
             assert body["appointment_candidates"], body
             assert body["ad_hoc_research_tasks"], body
+            assert body["transcript_reviews"], body
 
             daily_task = body["daily_tasks"][0]
             appointment = body["appointment_candidates"][0]
@@ -212,6 +225,8 @@ def test_live_external_provider_full_api_e2e(monkeypatch):
             assert daily_task["payload"]["title"] == "Give Panadol before lunch"
             assert appointment["payload"]["requires_calendar_write"] is True
             assert research_task["payload"]["requires_guardrail_review"] is True
+            assert all(review["payload"]["provider"] == "sealion" for review in body["transcript_reviews"])
+            assert all(review["payload"]["configured"] is True for review in body["transcript_reviews"])
 
             calendar_write = client.post(f"/appointments/{appointment['id']}/approve-calendar-write", headers=headers)
             assert calendar_write.status_code == 200, calendar_write.text
@@ -227,6 +242,8 @@ def test_live_external_provider_full_api_e2e(monkeypatch):
 
             research = client.post(f"/research/tasks/{research_task['id']}/run", headers=headers)
             assert research.status_code == 200, research.text
+            assert research.json()["secondary_guardrail_review"], research.json()
+            assert research.json()["secondary_guardrail_review"]["payload"]["provider"] == "sealion_guard"
             recommendation = research.json()["synthesized_recommendation"]["payload"]
             assert recommendation["evidence"], recommendation
             assert any(source["provider"] != "curated_corpus" for source in recommendation["evidence"]), recommendation["evidence"]
