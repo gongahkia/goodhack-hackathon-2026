@@ -51,6 +51,7 @@
 - In-memory graph store is used when `DATABASE_URL` is empty.
 - Server reloads clear in-memory sessions.
 - Transcription language override: `POST /transcriptions?language=ms` or `POST /transcribe?language=zh`.
+- First-class language hints: `auto`, `en`, `ms`, `ta`, `zh`, `th`; locale/name aliases such as `en-SG`, `bahasa melayu`, `தமிழ்`, `zh-Hans`, `普通话`, and `ภาษาไทย` normalize to those codes.
 - Non-English transcripts preserve original text and add English-normalized text.
 - Optional external keys: `TINYFISH_API_KEY`, `EXA_API_KEY`, `SEALION_API_KEY`, `JINA_API_KEY`, `OPENALEX_API_KEY`, `SEMANTIC_SCHOLAR_API_KEY`.
 - Optional Google Calendar: `GOOGLE_CALENDAR_ACCESS_TOKEN`, `GOOGLE_CALENDAR_ID=primary`.

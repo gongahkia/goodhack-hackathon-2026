@@ -711,6 +711,60 @@ def _extract_native_time_expressions(text: str, language: str, today: date) -> l
     return expressions
 
 
+def _native_tomorrow_cue(text: str, language: str) -> str | None:
+    haystack = text.lower() if language == "ms" else text
+    for cue in {
+        "ms": ("esok",),
+        "ta": ("நாளை",),
+        "zh": ("明天",),
+        "th": ("พรุ่งนี้",),
+    }.get(language, ()):
+        if cue in haystack:
+            return cue
+    return None
+
+
+def _native_time_windows(text: str, language: str) -> list[tuple[str, str]]:
+    matches: list[tuple[str, str]] = []
+    if language == "ms":
+        for match in re.finditer(r"\b(?:pukul|jam)\s*(\d{1,2})(?::(\d{2}))?\s*(pagi|tengah hari|petang|malam)?\b", text, re.IGNORECASE):
+            normalized = _native_clock_time(match.group(1), match.group(2), match.group(3))
+            if normalized:
+                matches.append((match.group(0), normalized))
+    elif language == "ta":
+        for match in re.finditer(r"(காலை|மதியம்|மாலை|இரவு)?\s*(\d{1,2})(?::(\d{2}))?\s*மணி", text):
+            normalized = _native_clock_time(match.group(2), match.group(3), match.group(1))
+            if normalized:
+                matches.append((match.group(0), normalized))
+    elif language == "zh":
+        for match in re.finditer(r"(上午|早上|下午|晚上|傍晚)?\s*(\d{1,2})(?:点|點)(半|:(\d{2}))?", text):
+            minute = "30" if match.group(3) == "半" else match.group(4)
+            normalized = _native_clock_time(match.group(2), minute, match.group(1))
+            if normalized:
+                matches.append((match.group(0), normalized))
+    elif language == "th":
+        for match in re.finditer(r"(?:เวลา\s*)?(\d{1,2})(?::(\d{2}))?\s*(น\.|โมงเช้า|โมง|ทุ่ม|บ่าย|เย็น)", text):
+            normalized = _native_clock_time(match.group(1), match.group(2), match.group(3))
+            if normalized:
+                matches.append((match.group(0), normalized))
+    return list(dict.fromkeys(matches))
+
+
+def _native_clock_time(hour_value: str, minute_value: str | None, period: str | None) -> str | None:
+    hour = int(hour_value)
+    minute = int(minute_value or "0")
+    if not 0 <= hour <= 23 or minute > 59:
+        return None
+    period_text = str(period or "").lower()
+    afternoon_cues = ("petang", "malam", "tengah hari", "மதியம்", "மாலை", "இரவு", "下午", "晚上", "傍晚", "ทุ่ม", "บ่าย", "เย็น")
+    morning_cues = ("pagi", "காலை", "上午", "早上", "โมงเช้า")
+    if any(cue in period_text for cue in afternoon_cues) and hour < 12:
+        hour += 12
+    if any(cue in period_text for cue in morning_cues) and hour == 12:
+        hour = 0
+    return f"{hour:02d}:{minute:02d}"
+
+
 def _extract_native_recurrences(text: str, language: str, today: date) -> list[ExtractedRecurrence]:
     recurrences = _extract_recurrences(text, today)
     haystack = text.lower() if language == "ms" else text
@@ -756,7 +810,7 @@ def _extract_native_medical_context(text: str, language: str) -> ExtractedMedica
     return ExtractedMedicalContext(
         conditions=[condition for condition in CONDITIONS if condition in haystack],
         risks=risks,
-        clinician_warnings=risks if any(cue in haystack for cue in ("doktor", "மருத்துவர்", "医生")) else [],
+        clinician_warnings=risks if any(cue in haystack for cue in ("doktor", "மருத்துவர்", "医生", "หมอ", "แพทย์")) else [],
     )
 
 

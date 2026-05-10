@@ -8,7 +8,7 @@ from app.extraction import process_redacted_transcript
 from app.privacy import redact_transcript_direct_pii, rehydrate_placeholders
 from app.store import MemoryGraphStore
 from app.transcript_pipeline import ingest_audio_transcription, redact_stored_transcript
-from app.transcription import TranscriptionInputError, TranscriptionResult, TranscriptionUnavailable, transcribe_audio
+from app.transcription import TranscriptionInputError, TranscriptionResult, TranscriptionUnavailable, normalize_transcription_language, transcribe_audio, transcription_prompt
 
 
 @pytest.mark.asyncio
@@ -79,7 +79,7 @@ async def test_openai_transcription_auto_language_omits_language_hint(monkeypatc
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("language", "expected_label"),
-    [("ms", "Malay/Bahasa"), ("ta", "Tamil"), ("zh", "Mandarin Chinese"), ("th", "Thai")],
+    [("en", "English"), ("ms", "Malay/Bahasa"), ("ta", "Tamil"), ("zh", "Mandarin Chinese"), ("th", "Thai")],
 )
 async def test_openai_transcription_first_class_language_hints(monkeypatch, language, expected_label):
     captured: dict[str, object] = {}
@@ -104,10 +104,29 @@ async def test_openai_transcription_first_class_language_hints(monkeypatch, lang
     assert result.requested_language == language
     assert result.detected_language == language
     assert result.language_label == expected_label
+    assert captured["data"]["prompt"]
+    assert "medication names" in captured["data"]["prompt"]
     if language == "zh":
         assert "Simplified Chinese" in captured["data"]["prompt"]
-    if language == "th":
-        assert "Thai" in captured["data"]["prompt"]
+
+
+@pytest.mark.parametrize(
+    ("raw_language", "expected"),
+    [
+        ("en-SG", "en"),
+        ("bahasa melayu", "ms"),
+        ("melayu", "ms"),
+        ("தமிழ்", "ta"),
+        ("zh-Hans", "zh"),
+        ("cmn", "zh"),
+        ("普通话", "zh"),
+        ("ภาษาไทย", "th"),
+    ],
+)
+def test_supported_language_aliases_normalize_to_first_class_codes(raw_language, expected):
+    assert normalize_transcription_language(raw_language) == expected
+    if expected:
+        assert transcription_prompt(expected)
 
 
 @pytest.mark.asyncio

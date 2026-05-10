@@ -208,6 +208,56 @@ async def test_native_multilingual_extraction_without_english_normalization(lang
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("language", "text", "expected_kind", "expected_time"),
+    [
+        (
+            "ms",
+            "PERSON_1 perlu makan Panadol sebelum makan tengahari tiap-tiap hari. Temujanji fisioterapi 1/6/2026 pukul 2 petang. Doktor cakap mungkin memerlukan kerusi roda, semak skim bantuan kewangan.",
+            "physio",
+            "14:00",
+        ),
+        (
+            "ta",
+            "PERSON_1 தினசரி மதிய சாப்பாட்டுக்கு முன் Panadol எடுத்துக்கொள்ள வேண்டும். மருத்துவர் சந்திப்பு 2026-06-01 காலை 10 மணி. மருத்துவர் கூறினார் சக்கர நாற்காலி நிதி உதவி தேவைப்படலாம்.",
+            "doctor",
+            "10:00",
+        ),
+        (
+            "zh",
+            "PERSON_1 天天午饭前吃 Panadol。2026年6月1日 上午10点 医生复诊。医生建议可能需要轮椅资助。",
+            "doctor",
+            "10:00",
+        ),
+        (
+            "th",
+            "PERSON_1 กิน Panadol ก่อนมื้อกลางวันทุกวัน. นัดหมอ 2026-06-01 เวลา 10:00 น. แพทย์บอกว่าอาจจำเป็นต้องใช้รถเข็น ขอเงินช่วยเหลือ.",
+            "doctor",
+            "10:00",
+        ),
+    ],
+)
+async def test_native_multilingual_extraction_handles_expanded_local_phrasing(language, text, expected_kind, expected_time):
+    store = MemoryGraphStore()
+    redaction = await _native_redaction(store, text, language)
+
+    result = await process_redacted_transcript(store, redaction, reference_date=date(2026, 5, 9))
+
+    triage = result["triage_decision"]["payload"]
+    task = result["daily_tasks"][0]["payload"]
+    appointment = result["appointment_candidates"][0]["payload"]
+    research = result["ad_hoc_research_tasks"][0]["payload"]
+
+    assert triage["buckets"] == ["daily_task", "appointment", "ad_hoc_research"]
+    assert task["recurrence"] == "daily"
+    assert task["timing_relation"] == "before lunch"
+    assert appointment["kind"] == expected_kind
+    assert appointment["date"] == "2026-06-01"
+    assert appointment["time"] == expected_time
+    assert research["source_status"] == "pending_guardrail"
+
+
+@pytest.mark.asyncio
 async def test_native_multilingual_extraction_tolerates_invalid_dates_and_times():
     store = MemoryGraphStore()
     redaction = await _native_redaction(
