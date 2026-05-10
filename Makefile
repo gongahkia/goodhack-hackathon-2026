@@ -7,13 +7,15 @@ BACKEND_UVICORN := $(BACKEND_VENV)/bin/uvicorn
 BACKEND_PYTEST := $(BACKEND_VENV)/bin/pytest
 FRONTEND_DIR := frontend
 
-.PHONY: help install install-backend install-frontend backend frontend dev test test-backend build-frontend live-external-e2e robustness-loop clean
+.PHONY: help install install-backend install-frontend backend frontend dev fresh-dev stop-dev test test-backend build-frontend live-external-e2e robustness-loop clean
 
 help:
 	@echo "Caregiver Companion commands"
 	@echo ""
 	@echo "  make install           Install backend and frontend dependencies"
 	@echo "  make dev               Run backend and frontend"
+	@echo "  make fresh-dev         Stop existing dev servers, then run both"
+	@echo "  make stop-dev          Stop listeners on :8000 and :5173"
 	@echo "  make backend           Run FastAPI on http://127.0.0.1:8000"
 	@echo "  make frontend          Run Vite on http://127.0.0.1:5173"
 	@echo "  make test              Run backend tests"
@@ -35,7 +37,11 @@ backend:
 	cd $(BACKEND_DIR) && . .venv/bin/activate && uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
 frontend:
-	cd $(FRONTEND_DIR) && npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
+	@if lsof -tiTCP:5173 -sTCP:LISTEN >/dev/null 2>&1; then \
+		echo "frontend already running on http://127.0.0.1:5173"; \
+	else \
+		cd $(FRONTEND_DIR) && npm run dev -- --host 127.0.0.1 --port 5173 --strictPort; \
+	fi
 
 dev:
 	@set -e; \
@@ -43,6 +49,17 @@ dev:
 	$(MAKE) frontend & frontend_pid=$$!; \
 	trap 'kill $$backend_pid $$frontend_pid 2>/dev/null || true' INT TERM EXIT; \
 	wait $$backend_pid $$frontend_pid
+
+fresh-dev: stop-dev dev
+
+stop-dev:
+	@pids=$$(lsof -tiTCP:8000 -sTCP:LISTEN 2>/dev/null; lsof -tiTCP:5173 -sTCP:LISTEN 2>/dev/null); \
+	if [ -n "$$pids" ]; then \
+		echo "$$pids" | xargs kill; \
+		echo "stopped dev listeners on :8000/:5173"; \
+	else \
+		echo "no dev listeners on :8000/:5173"; \
+	fi
 
 test: test-backend
 
