@@ -235,7 +235,7 @@ def _medication_spacing_conflict(task: Node, target_date: date) -> dict[str, Any
         return None
     meal_times = _meal_times(task.payload)
     dose_times = [_minus_minutes(meal_times[name], 30) for name in ("breakfast", "lunch", "dinner")]
-    dose_datetimes = [datetime.combine(target_date, item, tzinfo=SINGAPORE_TZ) for item in dose_times]
+    dose_datetimes = [datetime.combine(target_date, item, tzinfo=_task_tz(task.payload)) for item in dose_times]
     gaps = [(dose_datetimes[index + 1] - dose_datetimes[index]).total_seconds() / 60 for index in range(len(dose_datetimes) - 1)]
     if min(gaps) >= MIN_THREE_TIMES_DAILY_SPACING_MINUTES:
         return None
