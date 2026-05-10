@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -6,6 +7,7 @@ from fastapi.testclient import TestClient
 import app.main as main
 from app.approvals import approve_appointment_calendar_write, update_daily_task
 from app.config import Settings
+from app.scheduler import CalendarEvent, SINGAPORE_TZ
 from app.store import MemoryGraphStore
 
 
@@ -20,6 +22,29 @@ class FakeCalendarWriter:
         if self.error:
             raise self.error
         return self.response
+
+
+class BlockingCalendarWriter(FakeCalendarWriter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def insert_event(self, payload: dict) -> dict:
+        self.payloads.append(payload)
+        self.started.set()
+        await self.release.wait()
+        return self.response
+
+
+class FakeCalendarProvider:
+    def __init__(self, events: list[CalendarEvent]) -> None:
+        self.events = events
+        self.calls: list[tuple] = []
+
+    async def list_events(self, start_at, end_at) -> list[CalendarEvent]:
+        self.calls.append((start_at, end_at))
+        return self.events
 
 
 async def _daily_task(store: MemoryGraphStore):
@@ -133,6 +158,79 @@ async def test_appointment_calendar_write_rejects_duplicate_insert():
 
     with pytest.raises(ValueError, match="already been written"):
         await approve_appointment_calendar_write(store, "patient-1", appointment, Settings(), FakeCalendarWriter())
+
+
+@pytest.mark.asyncio
+async def test_concurrent_appointment_calendar_write_uses_lock_to_prevent_duplicate_insert():
+    store = MemoryGraphStore()
+    appointment = await _appointment(store)
+    writer = BlockingCalendarWriter()
+
+    first = asyncio.create_task(approve_appointment_calendar_write(store, "patient-1", appointment, Settings(), writer))
+    await writer.started.wait()
+    with pytest.raises(ValueError, match="already in progress"):
+        await approve_appointment_calendar_write(store, "patient-1", appointment, Settings(), writer)
+    writer.release.set()
+    result = await first
+
+    assert result["calendar_write_request"]["payload"]["status"] == "written"
+    assert len(writer.payloads) == 1
+    assert len(await store.list_nodes("patient-1", ["calendar_write_request"])) == 1
+
+
+@pytest.mark.asyncio
+async def test_appointment_calendar_write_blocks_insert_when_google_conflict_exists():
+    store = MemoryGraphStore()
+    appointment = await _appointment(store)
+    writer = FakeCalendarWriter()
+    provider = FakeCalendarProvider(
+        [
+            CalendarEvent(
+                id="busy-1",
+                title="Existing appointment",
+                start_at=datetime(2026, 6, 1, 10, 30, tzinfo=SINGAPORE_TZ),
+                end_at=datetime(2026, 6, 1, 11, 30, tzinfo=SINGAPORE_TZ),
+            )
+        ]
+    )
+
+    result = await approve_appointment_calendar_write(store, "patient-1", appointment, Settings(), writer, provider)
+
+    assert writer.payloads == []
+    assert provider.calls == [(datetime(2026, 6, 1, 10, 0, tzinfo=SINGAPORE_TZ), datetime(2026, 6, 1, 11, 0, tzinfo=SINGAPORE_TZ))]
+    assert result["calendar_event"] is None
+    assert result["calendar_write_request"]["payload"]["status"] == "blocked_conflict"
+    assert result["schedule_conflict"]["payload"]["calendar_event_id"] == "busy-1"
+    updated = await store.get_node(appointment.id)
+    assert updated.payload["calendar_write_status"] == "pending_user_approval"
+    assert await store.list_nodes("patient-1", ["schedule_conflict"])
+
+
+@pytest.mark.asyncio
+async def test_appointment_calendar_write_blocks_insert_when_pending_appointment_overlaps():
+    store = MemoryGraphStore()
+    appointment = await _appointment(store)
+    existing = await store.create_node(
+        "appointment_candidate",
+        {
+            "patient_id": "patient-1",
+            "title": "Existing physio",
+            "date": "2026-06-01",
+            "time": "10:30",
+            "requires_calendar_write": True,
+            "calendar_write_status": "pending_user_approval",
+        },
+        "agent",
+    )
+    writer = FakeCalendarWriter()
+    provider = FakeCalendarProvider([])
+
+    result = await approve_appointment_calendar_write(store, "patient-1", appointment, Settings(), writer, provider)
+
+    assert writer.payloads == []
+    assert provider.calls == []
+    assert result["calendar_write_request"]["payload"]["status"] == "blocked_conflict"
+    assert result["schedule_conflict"]["payload"]["conflicting_appointment_candidate_id"] == str(existing.id)
 
 
 @pytest.mark.asyncio

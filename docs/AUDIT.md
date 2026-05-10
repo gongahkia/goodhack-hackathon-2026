@@ -18,8 +18,6 @@ Judge-style critical audit. Completeness over ease. No sycophancy. File:line ref
 
 ### Gaps
 
-- **No idempotency on Google insert** — `approvals.py:87–172` read-then-writes `calendar_write_status` across awaits; `acquire_system_lock` (`store.py:428`) is unused. Concurrent approvals → duplicate events.
-- **No conflict check at write time** — appointments don't pre-flight against existing Google events or other pending appointments. Scheduler's overlap logic (`scheduler.py:294`) is daily-task-only.
 - **No update/cancel path** — `google_event_id` is stored but no PATCH/DELETE in `main.py`. Reschedules produce orphans.
 - **Plaintext PII to Google** — `approvals.py` rehydrates patient name into `summary`/`description` (`extraction.py:803`). PDPA: cross-border processor disclosure with no DPIA recorded.
 - **`location` is dead code** — `extraction.py:807` hardwires `None`; clinic name never captured.
@@ -27,8 +25,6 @@ Judge-style critical audit. Completeness over ease. No sycophancy. File:line ref
 
 ### Remedies
 
-- Compound-unique index on `(appointment_candidate_id, calendar_write_status="written")`; wrap insert in `acquire_system_lock(f"calwrite:{id}")` w/ idempotency-key sent to Google.
-- Add `freebusy.query` precheck before insert; surface conflicts as `schedule_conflict` node.
 - Add PATCH/DELETE endpoints that mirror to Google via stored `google_event_id`.
 - Replace plaintext name in event body w/ tokenized initials + private link to internal record; keep PII server-side.
 - Capture location at extraction (NER or regex on "at <X> clinic/polyclinic/hospital"); persist + ship to calendar `location` field.
