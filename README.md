@@ -1,4 +1,4 @@
-# Caregiver Companion Backend
+# Handoff: Caregiver Companion App
 
 ## Purpose
 - Backend-first, transcription-driven care workflow.
