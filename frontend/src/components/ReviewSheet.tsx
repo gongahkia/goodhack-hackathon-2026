@@ -80,6 +80,7 @@ export default function ReviewSheet({ open, initialTasks, onConfirm, onBack }: P
           background: 'rgba(10,12,26,0.55)',
           opacity: open ? 1 : 0,
           pointerEvents: open ? 'auto' : 'none',
+          visibility: open ? 'visible' : 'hidden',
           transition: 'opacity 0.32s ease',
           zIndex: 60,
         }}
@@ -99,6 +100,8 @@ export default function ReviewSheet({ open, initialTasks, onConfirm, onBack }: P
         flexDirection: 'column',
         overflow: 'hidden',
         boxShadow: '0 -10px 40px rgba(13,13,18,0.18)',
+        pointerEvents: open ? 'auto' : 'none',
+        visibility: open ? 'visible' : 'hidden',
       }}>
 
         {/* Drag handle */}
@@ -319,7 +322,7 @@ function ReviewRow({
   chipBg: string
   title: string
   editing: boolean
-  inputRef: React.RefObject<HTMLInputElement> | null
+  inputRef: React.RefObject<HTMLInputElement | null> | null
   onTitleClick: () => void
   onTitleChange: (v: string) => void
   onCommit: () => void

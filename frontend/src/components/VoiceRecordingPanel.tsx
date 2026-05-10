@@ -1,31 +1,39 @@
-import { useState, useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { createTranscription } from '../api'
 import { colors, font, radius, spacing } from '../tokens'
+
+interface RecordingComplete {
+  transcriptionSessionId: string
+  transcriptId?: string
+  displayTranscript: string
+}
 
 interface Props {
   open: boolean
-  onComplete: () => void
+  onComplete: (recording: RecordingComplete) => void | Promise<void>
   onCancel: () => void
 }
 
-const TRANSCRIPT = `Dr Rajendran: Good morning. I've reviewed Mdm Ang's discharge summary and recent progress notes. Overall she's tracking well, which is encouraging.
+type Phase = 'recording' | 'completing' | 'done'
 
-Medications: continue Aspirin 100mg with Atorvastatin 40mg every morning at 8, taken together with breakfast — never on an empty stomach. Target LDL below 1.8 mmol/L. Recheck at the 3-month lipid panel. Do not crush or split the tablets.
+type SpeechRecognitionLike = {
+  continuous: boolean
+  interimResults: boolean
+  lang: string
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null
+  onerror: (() => void) | null
+  start: () => void
+  stop: () => void
+  abort?: () => void
+}
 
-Blood pressure monitoring: morning reading at 8:30, after 5 minutes rest, before medications. Target 130 to 140 systolic, 80 to 90 diastolic. Omron upper-arm device, record both readings. If systolic exceeds 160 or drops below 110, call the clinic. Evening reading at 5 PM before dinner and before the Warfarin dose. Flag to me if the gap between morning and evening exceeds 20 systolic.
+type SpeechRecognitionEventLike = {
+  resultIndex: number
+  results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>
+}
 
-Warfarin 2mg — strictly at 6 PM every day. Target INR 2.0 to 3.0. Next INR check in 2 weeks, around 20 May at Toa Payoh Polyclinic. Watch for unusual bruising, blood in urine, prolonged bleeding from cuts. Keep leafy vegetables consistent in the diet.
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
 
-Physiotherapy with Ms Wong — 30-minute sessions at 10 AM. Ankle pumps, knee raises each leg, shoulder shrugs, assisted standing at the bed rail for 3 sets of 30 seconds. Stop immediately if she reports dizziness, chest tightness, or pain. Progress to corridor walks once standing balance holds for 3 consecutive days.
-
-Speech therapy with Ms Priya — 15 minutes at 11:30. Oral motor drills, lip exercises, pa-ta-ka repetitions times 3 sets, read-aloud from the newspaper. Document any choking episodes or difficulty swallowing.
-
-Daily monitoring: fluid intake 6 to 8 cups thickened liquid throughout the day, Thick-It powder at nectar consistency. Thin liquids must be supervised. Skin check daily — sacrum, both heels, elbows, back of head — apply Sudocrem barrier cream after each check. Walking practice 2 to 3 corridor rounds with the quad cane, watch carefully for left foot drop, never leave unattended.
-
-Follow-ups: neurology outpatient 25 May, urgent — first post-discharge review, bring BP log and medication list, I'll refer for repeat brain MRI at that appointment. INR at Toa Payoh Polyclinic around 20 May, no referral needed. Speech and Language Therapy formal swallow assessment by 5 June. OT home visit around 10 June for fall risk and mobility aids assessment. Medical Social Worker consultation by 15 June for CareShield Life claims and home nursing subsidy options.
-
-Any questions from the family?`
-
-// 28 bars for a richer waveform
 const BAR_HEIGHTS = [
   0.30, 0.60, 0.90, 0.50, 0.82, 0.42, 0.88, 0.56,
   0.72, 0.36, 0.94, 0.52, 0.68, 0.44, 0.78, 0.32,
@@ -33,59 +41,149 @@ const BAR_HEIGHTS = [
   0.66, 0.76, 0.46, 0.58,
 ]
 
-type Phase = 'recording' | 'completing' | 'done'
+function speechCtor(): SpeechRecognitionConstructor | undefined {
+  const win = window as unknown as {
+    SpeechRecognition?: SpeechRecognitionConstructor
+    webkitSpeechRecognition?: SpeechRecognitionConstructor
+  }
+  return win.SpeechRecognition ?? win.webkitSpeechRecognition
+}
 
 export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Props) {
   const [phase, setPhase] = useState<Phase>('recording')
   const [seconds, setSeconds] = useState(0)
-  const [charCount, setCharCount] = useState(0)
+  const [transcript, setTranscript] = useState('')
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [transcriptId, setTranscriptId] = useState<string | undefined>()
+  const [error, setError] = useState<string | null>(null)
+  const [reviewing, setReviewing] = useState(false)
   const transcriptRef = useRef<HTMLDivElement>(null)
-  const charRef = useRef(0)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const chunksRef = useRef<Blob[]>([])
+  const streamRef = useRef<MediaStream | null>(null)
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  const finalSpeechRef = useRef('')
+  const cancelledRef = useRef(false)
 
-  // Reset when opened
   useEffect(() => {
     if (!open) return
     setPhase('recording')
     setSeconds(0)
-    setCharCount(0)
-    charRef.current = 0
+    setTranscript('')
+    setSessionId(null)
+    setTranscriptId(undefined)
+    setError(null)
+    setReviewing(false)
+    chunksRef.current = []
+    finalSpeechRef.current = ''
+    cancelledRef.current = false
+    void startCapture()
+    return stopCapture
   }, [open])
 
-  // Timer — runs during recording and completing
   useEffect(() => {
     if (!open || phase === 'done') return
     const id = setInterval(() => setSeconds(s => s + 1), 1000)
     return () => clearInterval(id)
   }, [open, phase])
 
-  // Transcript streaming
   useEffect(() => {
-    if (!open) return
-    const msPerChar = phase === 'recording' ? 9 : phase === 'completing' ? 1 : null
-    if (msPerChar === null) return
+    if (transcriptRef.current) transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
+  }, [transcript])
 
-    const id = setInterval(() => {
-      charRef.current = Math.min(charRef.current + (phase === 'completing' ? 6 : 1), TRANSCRIPT.length)
-      setCharCount(charRef.current)
-      if (charRef.current >= TRANSCRIPT.length) {
-        clearInterval(id)
-        setPhase('done')
+  async function startCapture() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      streamRef.current = stream
+      const recorder = new MediaRecorder(stream)
+      recorderRef.current = recorder
+      recorder.ondataavailable = event => {
+        if (event.data.size > 0) chunksRef.current.push(event.data)
       }
-    }, msPerChar)
-    return () => clearInterval(id)
-  }, [open, phase])
-
-  // Auto-scroll transcript
-  useEffect(() => {
-    if (transcriptRef.current) {
-      transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
+      recorder.onstop = () => {
+        if (!cancelledRef.current) void uploadRecording(recorder.mimeType || 'audio/webm')
+      }
+      recorder.start()
+      startSpeechTranscript()
+    } catch (captureError) {
+      setError(captureError instanceof Error ? captureError.message : 'Microphone capture failed')
+      setPhase('done')
     }
-  }, [charCount])
+  }
+
+  function startSpeechTranscript() {
+    const Ctor = speechCtor()
+    if (!Ctor) return
+    try {
+      const recognition = new Ctor()
+      recognition.continuous = true
+      recognition.interimResults = true
+      recognition.lang = 'en-SG'
+      recognition.onresult = event => {
+        let interim = ''
+        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+          const text = event.results[i][0].transcript
+          if (event.results[i].isFinal) finalSpeechRef.current += `${text} `
+          else interim += text
+        }
+        setTranscript(`${finalSpeechRef.current}${interim}`.trim())
+      }
+      recognition.onerror = () => undefined
+      recognition.start()
+      recognitionRef.current = recognition
+    } catch {
+      recognitionRef.current = null
+    }
+  }
+
+  function stopCapture() {
+    recognitionRef.current?.abort?.()
+    recognitionRef.current = null
+    streamRef.current?.getTracks().forEach(track => track.stop())
+    streamRef.current = null
+  }
+
+  async function uploadRecording(contentType: string) {
+    setPhase('completing')
+    stopCapture()
+    try {
+      const audio = new Blob(chunksRef.current, { type: contentType })
+      const result = await createTranscription(audio, 'en')
+      setSessionId(result.transcription_session.id)
+      setTranscriptId(result.transcript?.id)
+      setPhase('done')
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : 'Audio upload failed')
+      setPhase('done')
+    }
+  }
+
+  function stopRecording() {
+    if (recorderRef.current?.state === 'recording') {
+      setPhase('completing')
+      recorderRef.current.stop()
+    }
+  }
+
+  function cancel() {
+    cancelledRef.current = true
+    if (recorderRef.current?.state === 'recording') recorderRef.current.stop()
+    stopCapture()
+    onCancel()
+  }
+
+  async function reviewPlan() {
+    if (!sessionId) return
+    setReviewing(true)
+    await onComplete({ transcriptionSessionId: sessionId, transcriptId, displayTranscript: transcript })
+    setReviewing(false)
+  }
 
   const fmt = (s: number) =>
     `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
 
   const isActive = phase === 'recording'
+  const displayText = error || transcript || (isActive ? 'Listening...' : 'Audio captured. Backend transcription is being prepared.')
 
   return (
     <>
@@ -102,21 +200,20 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
         @keyframes w4 { 0%,100%{transform:scaleY(0.7)}  50%{transform:scaleY(0.3)} }
       `}</style>
 
-      {/* Backdrop */}
       <div
-        onClick={phase === 'recording' ? onCancel : undefined}
+        onClick={phase === 'recording' ? cancel : undefined}
         style={{
           position: 'absolute',
           inset: 0,
           background: 'rgba(10,12,26,0.60)',
           opacity: open ? 1 : 0,
           pointerEvents: open ? 'auto' : 'none',
+          visibility: open ? 'visible' : 'hidden',
           transition: 'opacity 0.3s ease',
           zIndex: 50,
         }}
       />
 
-      {/* Panel */}
       <div style={{
         position: 'absolute',
         left: 0,
@@ -131,14 +228,13 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
+        pointerEvents: open ? 'auto' : 'none',
+        visibility: open ? 'visible' : 'hidden',
       }}>
-
-        {/* Drag handle */}
         <div style={{ paddingTop: spacing.md, paddingBottom: spacing.sm, display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
           <div style={{ width: 36, height: 4, borderRadius: radius.full, background: colors.divider }} />
         </div>
 
-        {/* Status bar */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -153,7 +249,7 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
               width: 9,
               height: 9,
               borderRadius: radius.full,
-              background: isActive ? colors.statusUrgent : phase === 'completing' ? colors.accent : colors.statusDone,
+              background: isActive ? colors.statusUrgent : phase === 'completing' ? colors.accent : error ? colors.statusUrgent : colors.statusDone,
               animation: isActive ? 'recPulse 1.1s ease-in-out infinite' : 'none',
               transition: 'background 0.4s ease',
               flexShrink: 0,
@@ -161,11 +257,11 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
             <span style={{
               fontSize: font.size.sm,
               fontWeight: font.weight.bold,
-              color: isActive ? colors.statusUrgent : phase === 'completing' ? colors.accent : colors.statusDone,
+              color: isActive ? colors.statusUrgent : phase === 'completing' ? colors.accent : error ? colors.statusUrgent : colors.statusDone,
               letterSpacing: '0.8px',
               transition: 'color 0.4s ease',
             }}>
-              {isActive ? 'REC' : phase === 'completing' ? 'TRANSCRIBING' : 'DONE'}
+              {isActive ? 'REC' : phase === 'completing' ? 'TRANSCRIBING' : error ? 'ERROR' : 'DONE'}
             </span>
           </div>
           <span style={{
@@ -179,7 +275,6 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
           </span>
         </div>
 
-        {/* Waveform */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -206,7 +301,6 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
           ))}
         </div>
 
-        {/* Live transcript box */}
         <div style={{
           flex: 1,
           minHeight: 0,
@@ -215,14 +309,13 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
           marginBottom: spacing.md,
           borderRadius: radius.md,
           background: colors.surface,
-          border: `1.5px solid ${isActive ? colors.statusUrgent + '40' : colors.divider}`,
+          border: `1.5px solid ${isActive ? colors.statusUrgent + '40' : error ? colors.statusUrgent + '60' : colors.divider}`,
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
           transition: 'border-color 0.4s ease',
           position: 'relative',
         }}>
-          {/* Label */}
           <div style={{
             paddingLeft: spacing.lg,
             paddingRight: spacing.lg,
@@ -243,18 +336,13 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
             }}>
               Live transcript
             </span>
-            {phase === 'done' && (
-              <span style={{
-                fontSize: font.size.xs,
-                fontWeight: font.weight.medium,
-                color: colors.statusDone,
-              }}>
-                ✓ Review before saving
+            {phase === 'done' && sessionId && !error && (
+              <span style={{ fontSize: font.size.xs, fontWeight: font.weight.medium, color: colors.statusDone }}>
+                Review before saving
               </span>
             )}
           </div>
 
-          {/* Text */}
           <div
             ref={transcriptRef}
             style={{
@@ -269,18 +357,18 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
             <p style={{
               margin: 0,
               fontSize: font.size.sm,
-              color: charCount > 0 ? colors.textPrimary : colors.textDisabled,
+              color: error ? colors.statusUrgent : transcript ? colors.textPrimary : colors.textDisabled,
               lineHeight: '1.75',
               fontWeight: font.weight.regular,
               whiteSpace: 'pre-wrap',
             }}>
-              {charCount > 0 ? TRANSCRIPT.slice(0, charCount) : 'Listening…'}
-              {charCount > 0 && phase !== 'done' && (
+              {displayText}
+              {isActive && !error && (
                 <span style={{
                   display: 'inline-block',
                   width: 2,
                   height: '1em',
-                  background: isActive ? colors.statusUrgent : colors.primary,
+                  background: colors.statusUrgent,
                   marginLeft: 3,
                   verticalAlign: 'text-bottom',
                   borderRadius: 1,
@@ -290,7 +378,6 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
             </p>
           </div>
 
-          {/* Bottom fade */}
           <div style={{
             position: 'absolute',
             left: 0,
@@ -303,7 +390,6 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
           }} />
         </div>
 
-        {/* Action button */}
         <div style={{
           paddingLeft: spacing.lg,
           paddingRight: spacing.lg,
@@ -315,7 +401,7 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
         }}>
           {phase !== 'done' && (
             <button
-              onClick={onCancel}
+              onClick={cancel}
               style={{
                 width: 48,
                 height: 56,
@@ -331,13 +417,13 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
                 flexShrink: 0,
               }}
             >
-              ×
+              x
             </button>
           )}
 
           {phase === 'recording' && (
             <button
-              onClick={() => setPhase('completing')}
+              onClick={stopRecording}
               style={{
                 flex: 1,
                 height: 56,
@@ -376,35 +462,39 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
                 color: colors.textDisabled,
               }}
             >
-              Transcribing…
+              Transcribing...
             </button>
           )}
 
           {phase === 'done' && (
             <button
-              onClick={onComplete}
+              onClick={sessionId ? () => void reviewPlan() : cancel}
+              disabled={reviewing}
               style={{
                 flex: 1,
                 height: 56,
                 borderRadius: radius.md,
-                background: colors.primary,
+                background: sessionId ? colors.primary : colors.surface,
                 border: 'none',
-                cursor: 'pointer',
+                cursor: reviewing ? 'default' : 'pointer',
                 fontFamily: font.family,
                 fontSize: font.size.base,
                 fontWeight: font.weight.semibold,
-                color: 'white',
-                boxShadow: '0 4px 20px rgba(27,45,107,0.30)',
+                color: sessionId ? 'white' : colors.textSecondary,
+                boxShadow: sessionId ? '0 4px 20px rgba(27,45,107,0.30)' : 'none',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: spacing.sm,
+                opacity: reviewing ? 0.65 : 1,
               }}
             >
-              Review extracted plan
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <path d="M3 8h10M9 4l4 4-4 4" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
+              {sessionId ? (reviewing ? 'Extracting plan...' : 'Review extracted plan') : 'Close'}
+              {sessionId && !reviewing && (
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M3 8h10M9 4l4 4-4 4" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              )}
             </button>
           )}
         </div>

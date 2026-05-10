@@ -37,9 +37,10 @@ interface Props {
   task: Task | null
   createDefaults?: CreateDefaults | null
   onClose: () => void
-  onUpdate: (task: Task) => void
+  onUpdate: (task: Task) => void | Promise<void>
   onCreate?: (task: Task) => void
-  onDelete?: (id: string) => void
+  onDelete?: (id: string) => void | Promise<void>
+  onApproveCalendar?: (task: Task) => void | Promise<void>
 }
 
 function formatDueDate(iso: string) {
@@ -75,7 +76,7 @@ const sectionLabel: React.CSSProperties = {
   marginBottom: spacing.sm,
 }
 
-export default function TaskDetailSheet({ task, createDefaults, onClose, onUpdate, onCreate, onDelete }: Props) {
+export default function TaskDetailSheet({ task, createDefaults, onClose, onUpdate, onCreate, onDelete, onApproveCalendar }: Props) {
   const [visible, setVisible] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<Task | null>(null)
@@ -152,28 +153,33 @@ export default function TaskDetailSheet({ task, createDefaults, onClose, onUpdat
   }
 
   function handleComplete() {
+    if (!draft) return
     const updated = { ...draft, completed: !draft.completed }
     onUpdate(updated)
     handleClose()
   }
 
   function updateNextStep(i: number, value: string) {
+    if (!draft) return
     const steps = [...(draft.nextSteps ?? [])]
     steps[i] = { ...steps[i], label: value }
     setDraft({ ...draft, nextSteps: steps })
   }
 
   function addNextStep() {
+    if (!draft) return
     setDraft({ ...draft, nextSteps: [...(draft.nextSteps ?? []), { label: '' }] })
   }
 
   function removeNextStep(i: number) {
+    if (!draft) return
     const steps = [...(draft.nextSteps ?? [])]
     steps.splice(i, 1)
     setDraft({ ...draft, nextSteps: steps })
   }
 
   const isAdhoc = draft.category === 'adhoc'
+  const canApproveCalendar = draft.backendType === 'appointment_candidate' && draft.calendarWriteStatus === 'pending_user_approval'
 
   return (
     <div
@@ -303,6 +309,9 @@ export default function TaskDetailSheet({ task, createDefaults, onClose, onUpdat
               )}
               {draft.completed && (
                 <Badge color={colors.statusDone} bg={colors.statusDoneLight}>Completed</Badge>
+              )}
+              {canApproveCalendar && (
+                <Badge color={colors.primary} bg={colors.primaryLight}>Calendar pending</Badge>
               )}
             </div>
           )}
@@ -585,6 +594,28 @@ export default function TaskDetailSheet({ task, createDefaults, onClose, onUpdat
 
           {/* Mark complete / incomplete */}
           {!editing && !isCreating && (
+            <>
+            {canApproveCalendar && (
+              <button onClick={() => { onApproveCalendar?.(draft); handleClose() }} style={{
+                width: '100%',
+                height: 50,
+                borderRadius: radius.pill,
+                border: 'none',
+                background: colors.primary,
+                color: colors.white,
+                fontFamily: font.family,
+                fontSize: font.size.base,
+                fontWeight: font.weight.semibold,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: spacing.sm,
+                marginTop: spacing.md,
+              }}>
+                Add to Google Calendar
+              </button>
+            )}
             <button onClick={handleComplete} style={{
               width: '100%',
               height: 50,
@@ -618,6 +649,7 @@ export default function TaskDetailSheet({ task, createDefaults, onClose, onUpdat
                 </>
               )}
             </button>
+            </>
           )}
         </div>
       </div>
