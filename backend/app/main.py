@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
@@ -27,7 +28,7 @@ from .notifications import build_notifications
 from .patient import PATIENT, PATIENT_ID
 from .privacy import PiiRedactor, sanitize_audit_payload
 from .research import run_guarded_research_pipeline
-from .scheduler import run_next_day_schedule_check
+from .scheduler import daily_scheduler_loop, run_next_day_schedule_check
 from .security import InMemoryRateLimiter, key_matches, rate_limit_key, require_pilot_security, sanitize_public
 from .transcript_pipeline import ingest_audio_transcription, redact_stored_transcript
 from .store import GraphStore, MemoryGraphStore, PostgresGraphStore
@@ -62,12 +63,31 @@ rate_limiter = InMemoryRateLimiter()
 app = FastAPI(title=settings.app_name)
 
 
+_scheduler_task: asyncio.Task | None = None
+
+
 @app.on_event("startup")
 async def startup():
     require_pilot_security(settings)
     if "*" in [origin.strip() for origin in settings.cors_origins.split(",")]:
         raise RuntimeError("CORS_ORIGINS must be explicit when credentials are enabled.")
     await store.init()
+    if settings.scheduler_enabled:
+        global _scheduler_task
+        _scheduler_task = asyncio.create_task(daily_scheduler_loop(store, PATIENT_ID, settings))
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    global _scheduler_task
+    task = _scheduler_task
+    _scheduler_task = None
+    if task and not task.done():
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in settings.cors_origins.split(",")],

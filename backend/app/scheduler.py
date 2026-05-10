@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import asyncio
+import logging
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo
@@ -14,6 +16,7 @@ from .store import GraphStore
 
 
 SINGAPORE_TZ = PATIENT_TZ  # backwards-compat alias
+SCHEDULER_LOG = logging.getLogger("app.scheduler.loop")
 DEFAULT_MEAL_TIMES = {"breakfast": "08:00", "lunch": "12:00", "dinner": "18:00"}
 MIN_THREE_TIMES_DAILY_SPACING_MINUTES = 4 * 60
 
@@ -313,3 +316,32 @@ def _parse_time(value: str) -> time:
 def _minus_minutes(value: time, minutes: int) -> time:
     base = datetime.combine(date(2000, 1, 1), value)
     return (base - timedelta(minutes=minutes)).time()
+
+
+async def daily_scheduler_loop(
+    store: GraphStore,
+    patient_id: str,
+    settings: Settings,
+    calendar_provider: CalendarProvider | None = None,
+) -> None:
+    while True:
+        try:
+            now = datetime.now(PATIENT_TZ)
+            target = now.replace(
+                hour=settings.scheduler_run_hour,
+                minute=settings.scheduler_run_minute,
+                second=0,
+                microsecond=0,
+            )
+            if target <= now:
+                target = target + timedelta(days=1)
+            await asyncio.sleep((target - now).total_seconds())
+            target_date_iso = (target + timedelta(days=1)).date().isoformat()
+            lock_key = f"nextday:{patient_id}:{target_date_iso}"
+            if await store.acquire_system_lock(lock_key, ttl_seconds=600):
+                await run_next_day_schedule_check(store, patient_id, settings, calendar_provider, now=target)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            SCHEDULER_LOG.exception("daily_scheduler_loop iteration failed; retrying after backoff")
+            await asyncio.sleep(60)

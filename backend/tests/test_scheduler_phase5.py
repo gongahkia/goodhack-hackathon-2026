@@ -7,7 +7,10 @@ from zoneinfo import ZoneInfo
 from app.config import Settings
 from app.models import GraphSubset
 from app.notifications import build_notifications
-from app.scheduler import CalendarEvent, GoogleCalendarProvider, SINGAPORE_TZ, run_next_day_schedule_check
+import asyncio
+
+import app.scheduler as scheduler_module
+from app.scheduler import CalendarEvent, GoogleCalendarProvider, SINGAPORE_TZ, daily_scheduler_loop, run_next_day_schedule_check
 from app.store import MemoryGraphStore
 
 
@@ -199,3 +202,34 @@ async def test_persisted_notification_candidates_are_returned_by_notification_bu
     notifications = build_notifications(graph, await store.list_reasoning_logs())
 
     assert any(item["id"].startswith("notification:") and item["kind"] == "next-day conflict warning" for item in notifications)
+
+
+@pytest.mark.asyncio
+async def test_daily_scheduler_loop_acquires_lock_runs_check_and_cancels_cleanly(monkeypatch):
+    store = MemoryGraphStore()
+    await _daily_task(store, {"title": "Give Panadol before lunch", "timing_relation": "before lunch"})
+    real_sleep = asyncio.sleep
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+        await real_sleep(0)  # collapse to a single tick so test runs fast
+
+    monkeypatch.setattr(scheduler_module.asyncio, "sleep", fake_sleep)
+    provider = FakeCalendarProvider([])
+    settings = Settings(scheduler_run_hour=22, scheduler_run_minute=0)
+
+    task = asyncio.create_task(daily_scheduler_loop(store, "patient-1", settings, calendar_provider=provider))
+    for _ in range(200):
+        if provider.calls:
+            break
+        await real_sleep(0)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    assert provider.calls, "scheduler loop did not invoke run_next_day_schedule_check"
+    lock_keys = [key for key in store.system_state if key.startswith("nextday:patient-1:")]
+    assert lock_keys, "scheduler loop did not acquire any nextday lock"

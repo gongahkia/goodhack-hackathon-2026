@@ -1,0 +1,46 @@
+[
+  {
+    "id": "ms_romanized_local_time",
+    "language": "ms",
+    "text": "PERSON_1 perlu makan satu biji parasetamol 500mg sebelum makan tengahari tiap-tiap hari. Temujanji fisioterapi 1/6/2026 pukul 2 petang. Doktor cakap mungkin memerlukan kerusi roda, semak skim bantuan kewangan.",
+    "expected": {
+      "buckets": ["daily_task", "appointment", "ad_hoc_research"],
+      "daily_task": {"medication": "Paracetamol", "timing_relation": "before lunch", "recurrence": "daily", "quantity": "one tablet", "dose": "500mg"},
+      "appointment": {"kind": "physio", "date": "2026-06-01", "time": "14:00"},
+      "research_task": true
+    }
+  },
+  {
+    "id": "ta_romanized_caregiver",
+    "language": "ta",
+    "text": "PERSON_1 thinammum mathiya saapadu mun paracetamol 500mg oru tablet edukka vendum. doctor appointment 2026-06-01 kaalai 10 mani. doctor sonnar sakkara naarkali nidhi uthavi thevai padalam.",
+    "expected": {
+      "buckets": ["daily_task", "appointment", "ad_hoc_research"],
+      "daily_task": {"medication": "Paracetamol", "timing_relation": "before lunch", "recurrence": "daily", "quantity": "one tablet", "dose": "500mg"},
+      "appointment": {"kind": "doctor", "date": "2026-06-01", "time": "10:00"},
+      "research_task": true
+    }
+  },
+  {
+    "id": "zh_pinyin_caregiver",
+    "language": "zh",
+    "text": "PERSON_1 mei tian wu fan qian chi paracetamol 500mg yi pian. 2026-06-01 shang wu 10 dian kan yi sheng. yi sheng shuo ke neng xu yao lun yi bu zhu.",
+    "expected": {
+      "buckets": ["daily_task", "appointment", "ad_hoc_research"],
+      "daily_task": {"medication": "Paracetamol", "timing_relation": "before lunch", "recurrence": "daily", "quantity": "one tablet", "dose": "500mg"},
+      "appointment": {"kind": "doctor", "date": "2026-06-01", "time": "10:00"},
+      "research_task": true
+    }
+  },
+  {
+    "id": "th_romanized_caregiver",
+    "language": "th",
+    "text": "PERSON_1 gin paracetamol 500mg neung tablet gon ahan glang wan thuk wan. nad mor 2026-06-01 wela 10:00. mor bok aat tong chai rot khen, kor ngoen chuai luea.",
+    "expected": {
+      "buckets": ["daily_task", "appointment", "ad_hoc_research"],
+      "daily_task": {"medication": "Paracetamol", "timing_relation": "before lunch", "recurrence": "daily", "quantity": "one tablet", "dose": "500mg"},
+      "appointment": {"kind": "doctor", "date": "2026-06-01", "time": "10:00"},
+      "research_task": true
+    }
+  }
+]

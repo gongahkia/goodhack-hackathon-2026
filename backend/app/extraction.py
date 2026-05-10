@@ -96,7 +96,15 @@ class TriageResult(BaseModel):
     guardrail_reason: str
 
 
-MEDICATION_NAMES = ("panadol", "paracetamol", "insulin", "metformin", "aspirin", "levodopa")
+MEDICATION_ALIASES = {
+    "panadol": ("panadol", "பனடோல்", "必理痛", "พานาดอล"),
+    "paracetamol": ("paracetamol", "parasetamol", "பாராசிட்டமால்", "扑热息痛", "对乙酰氨基酚", "พาราเซตามอล", "พารา"),
+    "insulin": ("insulin", "insulin", "இன்சுலின்", "胰岛素", "อินซูลิน"),
+    "metformin": ("metformin", "மெட்ஃபார்மின்", "二甲双胍", "เมตฟอร์มิน"),
+    "aspirin": ("aspirin", "ஆஸ்பிரின்", "阿司匹林", "แอสไพริน"),
+    "levodopa": ("levodopa", "லெவோடோபா", "左旋多巴", "เลโวโดปา"),
+}
+MEDICATION_NAMES = tuple(MEDICATION_ALIASES)
 MEAL_TERMS = ("breakfast", "lunch", "dinner", "food", "meal")
 # Self-sufficient: these terms alone establish a clear care-resource need
 RESEARCH_SELF_SUFFICIENT_CUES = (
@@ -127,9 +135,9 @@ BODY_PARTS = ("knee", "leg", "foot", "ankle", "hand", "arm", "eye", "heart", "ki
 CONDITIONS = ("diabetes", "high blood sugar", "parkinson", "dementia", "stroke", "hypertension")
 NATIVE_DAILY_CUES = {
     "ms": ("setiap hari", "tiap hari", "tiap-tiap hari", "harian", "setiap pagi", "setiap malam"),
-    "ta": ("தினமும்", "தினசரி", "ஒவ்வொரு நாளும்", "நாள் தோறும்"),
-    "zh": ("每天", "每日", "天天", "每早", "每晚"),
-    "th": ("ทุกวัน", "วันละ", "เป็นประจำ"),
+    "ta": ("தினமும்", "தினசரி", "ஒவ்வொரு நாளும்", "நாள் தோறும்", "dhinamum", "thinammum", "ovvoru naalum"),
+    "zh": ("每天", "每日", "天天", "每早", "每晚", "mei tian", "meitian", "tian tian"),
+    "th": ("ทุกวัน", "วันละ", "เป็นประจำ", "tuk wan", "thuk wan", "wan la"),
 }
 NATIVE_MEAL_TIMING = {
     "ms": {
@@ -161,6 +169,10 @@ NATIVE_MEAL_TIMING = {
         "இரவு உணவுக்குப் பிறகு": "after dinner",
         "சாப்பாட்டுக்கு முன்": "before food",
         "சாப்பாட்டுக்குப் பிறகு": "after food",
+        "saapadu mun": "before food",
+        "saapadu pin": "after food",
+        "mathiya saapadu mun": "before lunch",
+        "mathiya unavukku mun": "before lunch",
     },
     "zh": {
         "早餐前": "before breakfast",
@@ -179,6 +191,11 @@ NATIVE_MEAL_TIMING = {
         "晚饭后": "after dinner",
         "饭前": "before food",
         "饭后": "after food",
+        "fan qian": "before food",
+        "fan hou": "after food",
+        "wu can qian": "before lunch",
+        "wucan qian": "before lunch",
+        "wu fan qian": "before lunch",
     },
     "th": {
         "ก่อนอาหารเช้า": "before breakfast",
@@ -193,25 +210,30 @@ NATIVE_MEAL_TIMING = {
         "หลังอาหารค่ำ": "after dinner",
         "ก่อนกินข้าว": "before food",
         "หลังกินข้าว": "after food",
+        "gon ahan": "before food",
+        "korn ahan": "before food",
+        "lang ahan": "after food",
+        "gon ahan glang wan": "before lunch",
+        "korn ahan klang wan": "before lunch",
     },
 }
 NATIVE_APPOINTMENT_CUES = {
     "ms": ("temu janji", "temujanji", "jumpa doktor", "klinik", "hospital", "fisioterapi", "fisio", "rawatan"),
-    "ta": ("மருத்துவர்", "மருத்துவமனை", "கிளினிக்", "சந்திப்பு", "நியமனம்", "பிசியோ"),
-    "zh": ("预约", "复诊", "复查", "医生", "看医生", "诊所", "医院", "物理治疗", "理疗"),
-    "th": ("นัด", "นัดหมอ", "พบแพทย์", "พบหมอ", "หมอ", "แพทย์", "คลินิก", "โรงพยาบาล", "กายภาพบำบัด", "กายภาพ", "แล็บ", "ตรวจเลือด"),
+    "ta": ("மருத்துவர்", "மருத்துவமனை", "கிளினிக்", "சந்திப்பு", "நியமனம்", "பிசியோ", "maruthuvar", "doctor", "clinic", "physio"),
+    "zh": ("预约", "复诊", "复查", "医生", "看医生", "诊所", "医院", "物理治疗", "理疗", "kan yi sheng", "yisheng", "fu zhen"),
+    "th": ("นัด", "นัดหมอ", "พบแพทย์", "พบหมอ", "หมอ", "แพทย์", "คลินิก", "โรงพยาบาล", "กายภาพบำบัด", "กายภาพ", "แล็บ", "ตรวจเลือด", "nad mor", "phop mor", "clinic"),
 }
 NATIVE_RESEARCH_CUES = {
     "ms": ("subsidi", "geran", "skim", "bantuan", "bantuan kewangan", "dana", "kerusi roda", "sokongan"),
-    "ta": ("மானியம்", "உதவி", "ஆதரவு", "சக்கர நாற்காலி", "நிதி", "நிதி உதவி", "உதவித்தொகை"),
-    "zh": ("补助", "津贴", "资助", "政府补贴", "轮椅", "援助", "经济援助", "辅助器具"),
-    "th": ("เงินอุดหนุน", "เงินช่วยเหลือ", "ทุน", "สวัสดิการ", "รถเข็น", "ความช่วยเหลือ", "การสนับสนุน"),
+    "ta": ("மானியம்", "உதவி", "ஆதரவு", "சக்கர நாற்காலி", "நிதி", "நிதி உதவி", "உதவித்தொகை", "sakkara naarkali", "nidhi uthavi", "uthavi"),
+    "zh": ("补助", "津贴", "资助", "政府补贴", "轮椅", "援助", "经济援助", "辅助器具", "bu zhu", "buzhu", "lun yi", "lunyi", "zi zhu"),
+    "th": ("เงินอุดหนุน", "เงินช่วยเหลือ", "ทุน", "สวัสดิการ", "รถเข็น", "ความช่วยเหลือ", "การสนับสนุน", "rot khen", "rod khen", "ngoen chuai luea"),
 }
 NATIVE_WARNING_CUES = {
     "ms": ("doktor kata", "doktor cakap", "kata doktor", "mungkin perlu", "mungkin memerlukan", "risiko"),
-    "ta": ("மருத்துவர் சொன்னார்", "மருத்துவர் கூறினார்", "தேவைப்படலாம்", "வேண்டியிருக்கும்", "ஆபத்து"),
-    "zh": ("医生说", "医生讲", "医生建议", "可能需要", "也许需要", "风险"),
-    "th": ("หมอบอก", "แพทย์บอก", "อาจต้อง", "อาจจำเป็น", "ความเสี่ยง", "เสี่ยง"),
+    "ta": ("மருத்துவர் சொன்னார்", "மருத்துவர் கூறினார்", "தேவைப்படலாம்", "வேண்டியிருக்கும்", "ஆபத்து", "doctor sonnar", "maruthuvar sonnar", "thevai padalam"),
+    "zh": ("医生说", "医生讲", "医生建议", "可能需要", "也许需要", "风险", "yi sheng shuo", "yisheng shuo", "ke neng xu yao"),
+    "th": ("หมอบอก", "แพทย์บอก", "อาจต้อง", "อาจจำเป็น", "ความเสี่ยง", "เสี่ยง", "mor bok", "doctor bok", "aat tong"),
 }
 
 
@@ -523,21 +545,21 @@ async def _refresh_nodes(store: GraphStore, nodes: list[Node]) -> list[Node]:
 def _extract_medications(text: str) -> list[ExtractedMedication]:
     medications = []
     lowered = text.lower()
-    for name in MEDICATION_NAMES:
-        if name not in lowered:
+    for canonical, alias in _matched_medication_aliases(text):
+        if canonical not in MEDICATION_NAMES:
             continue
-        display = _match_original_case(text, name)
-        dose_match = re.search(rf"\b{re.escape(display)}\b\s+(\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|units?))", text, re.IGNORECASE)
+        display = _match_original_case(text, alias) if alias.isascii() else alias
+        dose_match = _dose_after_alias(text, alias)
         quantity_match = re.search(r"\b(one|two|three|1|2|3)\s+(tablet|tablets|pill|pills|capsule|capsules)\b", text, re.IGNORECASE)
-        medication_quantity_match = re.search(rf"\b(one|two|three|1|2|3)\s+{re.escape(display)}\b", text, re.IGNORECASE)
+        medication_quantity_match = re.search(rf"\b(one|two|three|1|2|3)\s+{re.escape(alias)}\b", text, re.IGNORECASE)
         frequency = _frequency(text)
         timing = _timing_relation(text)
         medications.append(
             ExtractedMedication(
-                name=display,
-                dose=dose_match.group(1).replace(" ", "") if dose_match else None,
+                name=_canonical_medication_display(canonical, display),
+                dose=_normalize_dose(dose_match.group(1)) if dose_match else None,
                 quantity=" ".join(quantity_match.groups()) if quantity_match else f"{medication_quantity_match.group(1)} tablet" if medication_quantity_match else None,
-                route="oral" if quantity_match or display.lower() in {"panadol", "paracetamol", "aspirin", "metformin", "levodopa"} else None,
+                route="oral" if quantity_match or canonical in {"panadol", "paracetamol", "aspirin", "metformin", "levodopa"} else None,
                 frequency=frequency,
                 timing_relation=timing,
                 fixed_time_required=bool(timing or frequency),
@@ -562,6 +584,50 @@ def _extract_time_expressions(text: str, today: date) -> list[ExtractedTimeExpre
     for match in re.finditer(r"\b(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", text, re.IGNORECASE):
         expressions.append(ExtractedTimeExpression(raw_text=match.group(0), normalized_time_window=_normalize_time(match), confidence=0.85))
     return expressions
+
+
+def _matched_medication_aliases(text: str) -> list[tuple[str, str]]:
+    lowered = text.lower()
+    matches: list[tuple[str, str]] = []
+    for canonical, aliases in MEDICATION_ALIASES.items():
+        for alias in aliases:
+            if _alias_in_text(alias, lowered, text):
+                matches.append((canonical, alias))
+                break
+    return matches
+
+
+def _alias_in_text(alias: str, lowered_text: str, raw_text: str) -> bool:
+    if alias.isascii():
+        return bool(re.search(rf"(?<![A-Za-z0-9]){re.escape(alias.lower())}(?![A-Za-z0-9])", lowered_text))
+    return alias in raw_text
+
+
+def _dose_after_alias(text: str, alias: str) -> re.Match[str] | None:
+    units = r"(?:mg|mcg|g|ml|units?|மி\.?கி\.?|毫克|มก\.?)"
+    return re.search(rf"{re.escape(alias)}\s+(\d+(?:\.\d+)?\s*{units})", text, re.IGNORECASE)
+
+
+def _normalize_dose(value: str) -> str:
+    return re.sub(r"\s+", "", value).replace("மி.கி.", "mg").replace("மிகி", "mg").replace("毫克", "mg").replace("มก.", "mg")
+
+
+def _canonical_medication_display(canonical: str, display: str) -> str:
+    return "Panadol" if canonical == "panadol" else canonical.title()
+
+
+def _native_quantity(text: str, language: str) -> str | None:
+    haystack = text.lower() if language == "ms" else text
+    quantity_patterns = {
+        "ms": ((r"\b(satu|1)\s+(biji|tablet|pil)\b", "one tablet"), (r"\b(dua|2)\s+(biji|tablet|pil)\b", "two tablets")),
+        "ta": ((r"(ஒரு|1|oru|onnu)\s*(மாத்திரை|tablet)", "one tablet"), (r"(இரண்டு|2|irandu|rendu)\s*(மாத்திரை|tablet)", "two tablets")),
+        "zh": ((r"(一|1|yi)\s*(片|粒|tablet|pian)", "one tablet"), (r"(两|二|2|liang|er)\s*(片|粒|tablet|pian)", "two tablets")),
+        "th": ((r"(หนึ่ง|1|neung|nueng)\s*(เม็ด|tablet)", "one tablet"), (r"(สอง|2|song)\s*(เม็ด|tablet)", "two tablets")),
+    }
+    for pattern, normalized in quantity_patterns.get(language, ()):
+        if re.search(pattern, haystack, re.IGNORECASE):
+            return normalized
+    return None
 
 
 def _extract_recurrences(text: str, today: date) -> list[ExtractedRecurrence]:
@@ -653,19 +719,17 @@ def _financial_text(text: str) -> bool:
 
 def _extract_native_medications(text: str, language: str) -> list[ExtractedMedication]:
     medications = []
-    lowered = text.lower()
     timing = _native_timing_relation(text, language)
     frequency = _native_frequency(text, language)
-    for name in MEDICATION_NAMES:
-        if name not in lowered:
-            continue
-        display = _match_original_case(text, name)
-        dose_match = re.search(rf"\b{re.escape(display)}\b\s+(\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|units?))", text, re.IGNORECASE)
+    for canonical, alias in _matched_medication_aliases(text):
+        display = _match_original_case(text, alias) if alias.isascii() else alias
+        dose_match = _dose_after_alias(text, alias)
         medications.append(
             ExtractedMedication(
-                name=display,
-                dose=dose_match.group(1).replace(" ", "") if dose_match else None,
-                route="oral" if display.lower() in {"panadol", "paracetamol", "aspirin", "metformin", "levodopa"} else None,
+                name=_canonical_medication_display(canonical, display),
+                dose=_normalize_dose(dose_match.group(1)) if dose_match else None,
+                quantity=_native_quantity(text, language),
+                route="oral" if canonical in {"panadol", "paracetamol", "aspirin", "metformin", "levodopa"} else None,
                 frequency=frequency,
                 timing_relation=timing,
                 fixed_time_required=bool(timing or frequency),
@@ -715,11 +779,13 @@ def _native_tomorrow_cue(text: str, language: str) -> str | None:
     haystack = text.lower() if language == "ms" else text
     for cue in {
         "ms": ("esok",),
-        "ta": ("நாளை",),
-        "zh": ("明天",),
-        "th": ("พรุ่งนี้",),
+        "ta": ("நாளை", "naalai", "nalai"),
+        "zh": ("明天", "ming tian", "mingtian"),
+        "th": ("พรุ่งนี้", "phrung ni", "prung ni"),
     }.get(language, ()):
-        if cue in haystack:
+        check = cue if language == "ms" else cue.lower() if cue.isascii() else cue
+        target = haystack if language == "ms" else text.lower() if cue.isascii() else text
+        if check in target:
             return cue
     return None
 
@@ -736,14 +802,30 @@ def _native_time_windows(text: str, language: str) -> list[tuple[str, str]]:
             normalized = _native_clock_time(match.group(2), match.group(3), match.group(1))
             if normalized:
                 matches.append((match.group(0), normalized))
+        for match in re.finditer(r"\b(kaalai|madhiyam|maalai|iravu)?\s*(\d{1,2})(?::(\d{2}))?\s*mani\b", text, re.IGNORECASE):
+            normalized = _native_clock_time(match.group(2), match.group(3), match.group(1))
+            if normalized:
+                matches.append((match.group(0), normalized))
     elif language == "zh":
         for match in re.finditer(r"(上午|早上|下午|晚上|傍晚)?\s*(\d{1,2})(?:点|點)(半|:(\d{2}))?", text):
             minute = "30" if match.group(3) == "半" else match.group(4)
             normalized = _native_clock_time(match.group(2), minute, match.group(1))
             if normalized:
                 matches.append((match.group(0), normalized))
+        for match in re.finditer(r"\b(shang wu|xia wu|wan shang)?\s*(\d{1,2})(?::(\d{2}))?\s*dian\b", text, re.IGNORECASE):
+            normalized = _native_clock_time(match.group(2), match.group(3), match.group(1))
+            if normalized:
+                matches.append((match.group(0), normalized))
     elif language == "th":
         for match in re.finditer(r"(?:เวลา\s*)?(\d{1,2})(?::(\d{2}))?\s*(น\.|โมงเช้า|โมง|ทุ่ม|บ่าย|เย็น)", text):
+            normalized = _native_clock_time(match.group(1), match.group(2), match.group(3))
+            if normalized:
+                matches.append((match.group(0), normalized))
+        for match in re.finditer(r"\bwela\s*(\d{1,2})(?::(\d{2}))?\b", text, re.IGNORECASE):
+            normalized = _native_clock_time(match.group(1), match.group(2), None)
+            if normalized:
+                matches.append((match.group(0), normalized))
+        for match in re.finditer(r"\b(\d{1,2})(?::(\d{2}))?\s*(mong chao|bai|yen|thum)\b", text, re.IGNORECASE):
             normalized = _native_clock_time(match.group(1), match.group(2), match.group(3))
             if normalized:
                 matches.append((match.group(0), normalized))
@@ -756,8 +838,8 @@ def _native_clock_time(hour_value: str, minute_value: str | None, period: str | 
     if not 0 <= hour <= 23 or minute > 59:
         return None
     period_text = str(period or "").lower()
-    afternoon_cues = ("petang", "malam", "tengah hari", "மதியம்", "மாலை", "இரவு", "下午", "晚上", "傍晚", "ทุ่ม", "บ่าย", "เย็น")
-    morning_cues = ("pagi", "காலை", "上午", "早上", "โมงเช้า")
+    afternoon_cues = ("petang", "malam", "tengah hari", "மதியம்", "மாலை", "இரவு", "madhiyam", "maalai", "iravu", "下午", "晚上", "傍晚", "xia wu", "wan shang", "ทุ่ม", "บ่าย", "เย็น", "bai", "yen", "thum")
+    morning_cues = ("pagi", "காலை", "kaalai", "上午", "早上", "shang wu", "โมงเช้า", "mong chao")
     if any(cue in period_text for cue in afternoon_cues) and hour < 12:
         hour += 12
     if any(cue in period_text for cue in morning_cues) and hour == 12:
@@ -787,7 +869,7 @@ def _extract_native_appointments(
         kind = "physio"
     elif any(cue in haystack for cue in ("lab", "makmal", "化验", "แล็บ", "ตรวจเลือด")):
         kind = "lab"
-    elif any(cue in haystack for cue in ("doktor", "மருத்துவர்", "医生", "หมอ", "แพทย์")):
+    elif any(cue in haystack for cue in ("doktor", "மருத்துவர்", "maruthuvar", "doctor", "医生", "kan yi sheng", "yisheng", "yi sheng", "หมอ", "แพทย์", "mor")):
         kind = "doctor"
     date_expr = next((item for item in time_expressions if item.normalized_date), None)
     date_value = date_expr.normalized_date if date_expr else None
@@ -837,8 +919,10 @@ def _native_frequency(text: str, language: str) -> str | None:
 
 def _native_timing_relation(text: str, language: str) -> str | None:
     haystack = text.lower() if language == "ms" else text
-    for phrase, canonical in NATIVE_MEAL_TIMING.get(language, {}).items():
-        if phrase in haystack:
+    for phrase, canonical in sorted(NATIVE_MEAL_TIMING.get(language, {}).items(), key=lambda item: len(item[0]), reverse=True):
+        check = phrase if language == "ms" else phrase.lower() if phrase.isascii() else phrase
+        target = haystack if language == "ms" else text.lower() if phrase.isascii() else text
+        if check in target:
             return canonical
     return None
 

@@ -1,5 +1,7 @@
 import asyncio
+import json
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -63,3 +65,17 @@ def test_multilingual_fixture_extraction_accuracy_scores_required_artifacts():
     assert score["passed"] is True
     assert score["score"] == 1
     assert all(score["checks"].values())
+
+
+FIXTURE_PATH = Path(__file__).resolve().parents[2] / "data" / "multilingual_regression_fixtures.json"
+
+
+@pytest.mark.parametrize("fixture", json.loads(FIXTURE_PATH.read_text(encoding="utf-8")))
+def test_multilingual_regression_fixture_corpus(fixture):
+    store = MemoryGraphStore()
+    redaction = asyncio.run(_redaction(store, fixture["text"], fixture["language"]))
+    result = asyncio.run(process_redacted_transcript(store, redaction, reference_date=date(2026, 5, 9)))
+
+    score = extraction_accuracy(result, fixture["expected"])
+
+    assert score["passed"] is True, {"fixture": fixture["id"], "score": score, "result": result}

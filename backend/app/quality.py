@@ -45,6 +45,14 @@ def extraction_accuracy(result: dict[str, Any], expected: dict[str, Any]) -> dic
         "recurrence": not expected_daily.get("recurrence") or any(
             payload.get("recurrence") == expected_daily["recurrence"] for payload in daily_payloads
         ),
+        "quantity": not expected_daily.get("quantity") or any(
+            (payload.get("medication") or {}).get("quantity") == expected_daily["quantity"]
+            for payload in daily_payloads
+        ),
+        "dose": not expected_daily.get("dose") or any(
+            (payload.get("medication") or {}).get("dose") == expected_daily["dose"]
+            for payload in daily_payloads
+        ),
         "appointment": not expected_appointment or any(
             payload.get("kind") == expected_appointment.get("kind")
             and payload.get("date") == expected_appointment.get("date")

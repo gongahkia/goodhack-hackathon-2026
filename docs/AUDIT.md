@@ -19,8 +19,6 @@ Judge-style critical audit. Completeness over ease. No sycophancy. File:line ref
 ### Gaps
 
 - **No idempotency on Google insert** — `approvals.py:87–172` read-then-writes `calendar_write_status` across awaits; `acquire_system_lock` (`store.py:428`) is unused. Concurrent approvals → duplicate events.
-- **Silent time defaulting** — `approvals.py:193` hardcodes `09:00` when `time` missing; "Tuesday afternoon" writes 09:00 with no clarification gate. `extraction.py:545` only fills time on `HH:MM` regex match.
-- **TZ/date-roll bug surface** — `extraction.py:191` normalizes against UTC `today`; calendar writes in Asia/Singapore (`approvals.py:194`). Late-night SGT statements roll wrong calendar date. `extraction.py:849` auto-rolls past dates to `year+1` with no confirmation.
 - **No conflict check at write time** — appointments don't pre-flight against existing Google events or other pending appointments. Scheduler's overlap logic (`scheduler.py:294`) is daily-task-only.
 - **No update/cancel path** — `google_event_id` is stored but no PATCH/DELETE in `main.py`. Reschedules produce orphans.
 - **Plaintext PII to Google** — `approvals.py` rehydrates patient name into `summary`/`description` (`extraction.py:803`). PDPA: cross-border processor disclosure with no DPIA recorded.
@@ -30,8 +28,6 @@ Judge-style critical audit. Completeness over ease. No sycophancy. File:line ref
 ### Remedies
 
 - Compound-unique index on `(appointment_candidate_id, calendar_write_status="written")`; wrap insert in `acquire_system_lock(f"calwrite:{id}")` w/ idempotency-key sent to Google.
-- Replace 09:00 fallback w/ explicit `requires_clarification=true` and gate write on resolved time.
-- Centralize TZ in `config.py` (`PATIENT_TZ`); normalize all "today" via `datetime.now(PATIENT_TZ).date()`. Forbid `extraction` from writing `date_value` without a TZ-anchored timestamp.
 - Add `freebusy.query` precheck before insert; surface conflicts as `schedule_conflict` node.
 - Add PATCH/DELETE endpoints that mirror to Google via stored `google_event_id`.
 - Replace plaintext name in event body w/ tokenized initials + private link to internal record; keep PII server-side.
@@ -44,10 +40,8 @@ Judge-style critical audit. Completeness over ease. No sycophancy. File:line ref
 
 ### Gaps
 
-- **No actual scheduler** — ROADMAP claims daily 22:00 SGT cron; reality is on-demand `POST /scheduler/next-day-check` (`main.py:362`), no idempotency, double-runs duplicate `schedule_conflict`/`notification_candidate` nodes.
 - **`three_times_daily` spacing only checks "before" meals** (`scheduler.py:223`); "after meals" passes even when interval-incompatible.
 - **Naive alternative-time suggestion** (`scheduler.py:260`): 7am–9pm 15-min sweep, ignores other daily tasks, ignores med-spacing constraints, no working-hours model.
-- **Implicit TZ** — `scheduled_time` is `HH:MM` w/ no field declaring TZ; caregiver travel → silent corruption.
 - **Meal times global** (`scheduler.py:17` `08:00/12:00/18:00`); no per-patient profile.
 - **`send_at` math** (`scheduler.py:173`) can be in the past w/ no late flag; no delivery channel reads `notification_candidate.delivery_status`.
 - **`append_reasoning_step` JSONB read-modify-write race** (`store.py:260`) — no `SELECT … FOR UPDATE`. Steps lost under concurrency.
@@ -57,9 +51,7 @@ Judge-style critical audit. Completeness over ease. No sycophancy. File:line ref
 
 ### Remedies
 
-- Real scheduler (APScheduler or external cron → authenticated webhook) wrapped in `acquire_system_lock("nextday:" + date)`; idempotent on `(patient_id, target_date)`.
 - Replace meal-anchored spacing rule with absolute clinical interval map per drug class (e.g. levothyroxine 30-min fast, anticoagulant 12h spacing) sourced from a reviewable table.
-- Add `daily_task.timezone` field; default to `PATIENT_TZ`; UI surfaces TZ on edit.
 - Per-patient `meal_profile` node; meal anchors derived from it.
 - Build a real conflict solver: pull all daily_tasks, pending appointments, ad-hoc events, busy Google blocks; constraint-solve (greedy first; document fallback). Don't suggest into another task's slot.
 - Add `notification_dispatcher` worker that drains `delivery_status="pending"` w/ `send_at <= now`; mark `late=true` if `send_at` in past at creation.
