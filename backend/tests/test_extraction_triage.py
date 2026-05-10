@@ -187,6 +187,57 @@ def test_process_transcription_endpoint_auto_redacts_extracts_and_triages(monkey
     assert asyncio.run(store.list_nodes("mdm-tan", ["pii_redaction"]))
 
 
+def test_process_transcription_uses_latest_edited_transcript_text(monkeypatch):
+    store = MemoryGraphStore()
+
+    async def fake_init():
+        return None
+
+    store.init = fake_init
+    monkeypatch.setattr(main, "store", store)
+    monkeypatch.setattr(main, "settings", Settings())
+
+    async def seed_graph():
+        session = await store.create_node("transcription_session", {"patient_id": "mdm-tan"}, "user", status="approved")
+        transcript = await store.create_node("transcript", {"patient_id": "mdm-tan", "raw_text": "Would you like me to help you find a plan for a new patient?"}, "system", status="approved")
+        await store.create_edge(session.id, transcript.id, "transcribed_to")
+        return session.id, transcript.id
+
+    session_id, transcript_id = asyncio.run(seed_graph())
+
+    with TestClient(main.app) as client:
+        first = client.post(f"/transcriptions/{session_id}/process")
+        assert first.status_code == 200
+        assert first.json()["daily_tasks"] == []
+        assert first.json()["ad_hoc_research_tasks"] == []
+
+        edited_text = (
+            "Uncle John needs one Panadol 500mg before lunch daily. "
+            "Doctor said if high blood sugar continues John may need amputation then we might need to find wheelchair grants."
+        )
+        edit = client.patch(
+            f"/nodes/{transcript_id}",
+            json={
+                "payload": {
+                    "raw_text": edited_text,
+                    "normalized_english_text": None,
+                    "user_edited_text": True,
+                    "edited_at": "2026-05-10T06:33:00+00:00",
+                },
+                "status": "edited",
+            },
+        )
+        assert edit.status_code == 200
+
+        second = client.post(f"/transcriptions/{session_id}/process")
+
+    assert second.status_code == 200
+    body = second.json()
+    assert body["triage_decision"]["payload"]["buckets"] == ["daily_task", "ad_hoc_research"]
+    assert body["daily_tasks"][0]["payload"]["title"] == "Give Panadol before lunch"
+    assert body["ad_hoc_research_tasks"][0]["payload"]["display_title"] == "Research financial support options"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("language", "text", "expected_kind", "expected_date"),

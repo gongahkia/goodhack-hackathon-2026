@@ -34,7 +34,7 @@ from .privacy import PiiRedactor, sanitize_audit_payload
 from .research import run_guarded_research_pipeline
 from .scheduler import build_day_schedule, daily_scheduler_loop, list_active_schedule_conflicts, resolve_schedule_conflict, run_next_day_schedule_check, run_next_day_schedule_check_once
 from .security import InMemoryRateLimiter, key_matches, rate_limit_key, require_pilot_security, sanitize_public
-from .transcript_pipeline import ingest_audio_transcription, redact_stored_transcript
+from .transcript_pipeline import ingest_audio_transcription, redact_stored_transcript, transcript_source_fingerprint
 from .store import GraphStore, MemoryGraphStore, PostgresGraphStore
 from .transcription import TranscriptionError, TranscriptionInputError, normalize_transcription_language, transcribe_audio
 from .v2 import (
@@ -519,11 +519,17 @@ async def _transcript_for_session(session_id: UUID):
 
 
 async def _redaction_for_transcript(transcript: Node):
+    source_fingerprint = transcript_source_fingerprint(transcript)
+    require_fingerprint_match = bool(transcript.payload.get("edited_at") or transcript.payload.get("user_edited_text"))
     for edge in await store.list_edges():
         if edge.from_node == transcript.id and edge.type == "redacted_as":
             redaction = await store.get_node(edge.to_node)
             if redaction and redaction.type == "pii_redaction":
-                return redaction
+                redaction_fingerprint = redaction.payload.get("source_fingerprint")
+                if redaction_fingerprint == source_fingerprint:
+                    return redaction
+                if not require_fingerprint_match and not redaction_fingerprint:
+                    return redaction
     return await _redact_transcript_with_identity(transcript)
 
 

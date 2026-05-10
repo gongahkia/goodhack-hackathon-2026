@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from typing import Any
 
@@ -9,6 +10,16 @@ from .privacy import redact_transcript_direct_pii
 from .sealion_reviews import maybe_review_multilingual_transcript_with_sealion
 from .store import GraphStore
 from .transcription import TranscriptionError, TranscriptionInputError, normalize_transcript_to_english, transcribe_audio
+
+
+def transcript_source_text(transcript: Node) -> str:
+    raw_text = str(transcript.payload.get("raw_text") or "")
+    normalized_text = str(transcript.payload.get("normalized_english_text") or "").strip()
+    return normalized_text or raw_text
+
+
+def transcript_source_fingerprint(transcript: Node) -> str:
+    return hashlib.sha256(transcript_source_text(transcript).encode("utf-8")).hexdigest()
 
 
 async def ingest_audio_transcription(
@@ -158,7 +169,7 @@ async def redact_stored_transcript(
     patient_id = str(transcript.payload.get("patient_id") or "")
     raw_text = str(transcript.payload.get("raw_text") or "")
     normalized_text = str(transcript.payload.get("normalized_english_text") or "").strip()
-    source_text = normalized_text or raw_text
+    source_text = transcript_source_text(transcript)
     redaction = redact_transcript_direct_pii(source_text, known_people)
     original_known_people = list(known_people or [])
     original_known_people.extend(str(value) for value in redaction["placeholder_map"].values())
@@ -178,6 +189,8 @@ async def redact_stored_transcript(
             "language_label": transcript.payload.get("language_label"),
             "normalization_status": transcript.payload.get("normalization_status"),
             "original_redacted_text": original_redaction["redacted_text"] if original_redaction else None,
+            "source_fingerprint": transcript_source_fingerprint(transcript),
+            "transcript_edited_at": transcript.payload.get("edited_at"),
             "created_at": datetime.now(UTC).isoformat(),
         },
         "system",
