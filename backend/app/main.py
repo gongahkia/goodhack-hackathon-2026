@@ -20,7 +20,7 @@ from .compliance import (
     record_consent,
     record_processing_activity,
 )
-from .config import PATIENT_TZ, get_settings
+from .config import PATIENT_TZ, get_settings, is_vercel_runtime
 from .eval import evaluate_care_plan
 from .extraction import process_redacted_transcript
 from .graph_queries import backtrace_sources
@@ -75,7 +75,7 @@ async def startup():
     if "*" in [origin.strip() for origin in settings.cors_origins.split(",")]:
         raise RuntimeError("CORS_ORIGINS must be explicit when credentials are enabled.")
     await store.init()
-    if settings.scheduler_enabled:
+    if settings.scheduler_enabled and not is_vercel_runtime():
         global _scheduler_task
         _scheduler_task = asyncio.create_task(daily_scheduler_loop(store, PATIENT_ID, settings))
 

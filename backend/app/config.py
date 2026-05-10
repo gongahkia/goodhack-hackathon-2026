@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 from datetime import timezone, timedelta
 from pathlib import Path
@@ -102,3 +103,7 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def is_vercel_runtime() -> bool:
+    return any(os.getenv(name) for name in ("VERCEL", "VERCEL_ENV", "NOW_REGION"))
