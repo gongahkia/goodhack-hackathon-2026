@@ -2,6 +2,7 @@ import asyncio
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 import app.main as main
 import app.transcript_pipeline as transcript_pipeline
@@ -364,6 +365,69 @@ def test_transcription_route_rejects_empty_audio_before_provider_call(monkeypatc
     assert response.status_code == 400
     assert response.json()["detail"] == "No audio was received."
     assert called is False
+
+
+def test_live_transcription_ws_buffers_audio_and_persists_on_commit(monkeypatch):
+    store = _install_test_app(monkeypatch)
+    captured = {}
+
+    async def fake_ingest_audio_transcription(store_arg, patient_id, audio, content_type, settings):
+        captured["audio"] = audio
+        captured["content_type"] = content_type
+        captured["language"] = settings.transcription_language
+        session = await store_arg.create_node(
+            "transcription_session",
+            {"patient_id": patient_id, "status": "transcription_completed"},
+            "user",
+            status="approved",
+        )
+        transcript = await store_arg.create_node(
+            "transcript",
+            {"patient_id": patient_id, "raw_text": "John needs Panadol before lunch.", "language": "en"},
+            "system",
+            status="approved",
+        )
+        await store_arg.create_edge(session.id, transcript.id, "transcribed_to")
+        return {"transcription_session": session.model_dump(mode="json"), "transcript": transcript.model_dump(mode="json")}
+
+    monkeypatch.setattr(main, "ingest_audio_transcription", fake_ingest_audio_transcription)
+
+    with TestClient(main.app) as client:
+        with client.websocket_connect(f"/transcriptions/live?api_key={API_KEY}&language=en&content_type=audio/webm") as websocket:
+            ready = websocket.receive_json()
+            websocket.send_json({"type": "start", "content_type": "audio/webm;codecs=opus"})
+            started = websocket.receive_json()
+            websocket.send_bytes(b"fake ")
+            first_ack = websocket.receive_json()
+            websocket.send_bytes(b"audio")
+            second_ack = websocket.receive_json()
+            websocket.send_json({"type": "commit"})
+            final = websocket.receive_json()
+
+    assert ready["type"] == "ready"
+    assert ready["partial_transcripts"] is False
+    assert ready["fallback"] == "browser_speech_recognition"
+    assert started == {"type": "started", "content_type": "audio/webm;codecs=opus"}
+    assert first_ack == {"type": "ack", "bytes_received": 5, "total_bytes": 5}
+    assert second_ack == {"type": "ack", "bytes_received": 5, "total_bytes": 10}
+    assert final["type"] == "final"
+    assert final["result"]["transcript"]["payload"]["raw_text"] == "[redacted]"
+    assert captured == {"audio": b"fake audio", "content_type": "audio/webm;codecs=opus", "language": "en"}
+    consents = asyncio.run(store.list_nodes("mdm-tan", ["consent_record"]))
+    activities = asyncio.run(store.list_nodes("mdm-tan", ["processing_activity"]))
+    assert len(consents) == 1
+    assert len(activities) == 1
+
+
+def test_live_transcription_ws_rejects_missing_write_key(monkeypatch):
+    _install_test_app(monkeypatch)
+
+    with TestClient(main.app) as client:
+        try:
+            with client.websocket_connect("/transcriptions/live"):
+                raise AssertionError("websocket should not connect")
+        except WebSocketDisconnect as exc:
+            assert exc.code == 1008
 
 
 def test_transcription_routes_accept_language_override_and_reject_unsupported_language(monkeypatch):

@@ -82,6 +82,7 @@
 
 ## API Surface
 - `POST /transcriptions`
+- `WS /transcriptions/live`
 - `POST /transcriptions/{session_id}/process`
 - `POST /transcripts/{transcript_id}/redact`
 - `POST /transcripts/{transcript_id}/process`
@@ -98,6 +99,14 @@
 - `POST /privacy/requests`
 - `POST /privacy/incidents`
 - `POST /privacy/retention/purge`
+
+## Live Caption Contract
+- Frontend should show browser speech-recognition captions immediately.
+- Optionally connect to `WS /transcriptions/live?language=en&content_type=audio/webm`.
+- Browser clients may pass the write key as `api_key` query param because native WebSocket cannot set `X-API-Key`.
+- Send binary audio chunks, then `{"type":"commit"}`.
+- Backend returns `ready`, per-chunk `ack`, then `final` with the same stored transcript shape as `POST /transcriptions`.
+- Current backend WS is batch-on-commit and does not emit partial words; browser captions stay the live fallback.
 
 ## Verification
 - Unit/API tests: `make test`.

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from .approvals import approve_appointment_calendar_write, update_daily_task
@@ -264,23 +265,137 @@ async def create_transcription(request: Request, language: str | None = Query(de
     rate_limiter.check(rate_limit_key(request, "transcriptions"), settings.transcription_rate_limit, 3600)
     try:
         request_settings = transcription_settings_for_language(language)
-        await record_consent(store, PATIENT_ID, "audio_transcription")
-        result = await ingest_audio_transcription(store, PATIENT_ID, await request.body(), request.headers.get("content-type"), request_settings)
-        transcript_id = result.get("transcript", {}).get("id")
-        await record_processing_activity(
-            store,
-            PATIENT_ID,
-            "audio_transcription",
-            ["audio", "transcript", "health_context"],
-            transcript_id,
-            request_settings.transcription_provider,
-            "provider_default",
-        )
+        result = await _create_transcription_from_audio(await request.body(), request.headers.get("content-type"), request_settings)
         return sanitize_public(result)
     except TranscriptionInputError as exc:
         raise HTTPException(422 if "Unsupported transcription language" in str(exc) else exc.status_code, str(exc)) from exc
     except TranscriptionError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
+
+
+@app.websocket("/transcriptions/live")
+async def live_transcription(
+    websocket: WebSocket,
+    language: str | None = Query(default=None),
+    content_type: str | None = Query(default="audio/webm"),
+    api_key: str | None = Query(default=None),
+) -> None:
+    if not _websocket_write_access(websocket, api_key):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    try:
+        rate_limiter.check(_websocket_rate_limit_key(websocket, api_key, "transcriptions-live"), settings.transcription_rate_limit, 3600)
+        request_settings = transcription_settings_for_language(language)
+    except HTTPException as exc:
+        await websocket.accept()
+        await websocket.send_json({"type": "error", "detail": exc.detail})
+        await websocket.close(code=status.WS_1013_TRY_AGAIN_LATER)
+        return
+    except TranscriptionInputError as exc:
+        await websocket.accept()
+        await websocket.send_json({"type": "error", "detail": str(exc)})
+        await websocket.close(code=status.WS_1003_UNSUPPORTED_DATA)
+        return
+
+    await websocket.accept()
+    await websocket.send_json(
+        {
+            "type": "ready",
+            "source": "backend_batch_ws",
+            "partial_transcripts": False,
+            "fallback": "browser_speech_recognition",
+            "content_type": content_type,
+        }
+    )
+    chunks: list[bytes] = []
+    total_bytes = 0
+    try:
+        while True:
+            message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                return
+            chunk = message.get("bytes")
+            if chunk is not None:
+                total_bytes += len(chunk)
+                if total_bytes > request_settings.transcription_max_bytes:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "detail": f"Audio is too large. Max size is {request_settings.transcription_max_bytes // (1024 * 1024)} MB.",
+                        }
+                    )
+                    await websocket.close(code=status.WS_1009_MESSAGE_TOO_BIG)
+                    return
+                chunks.append(chunk)
+                await websocket.send_json({"type": "ack", "bytes_received": len(chunk), "total_bytes": total_bytes})
+                continue
+
+            text = message.get("text")
+            if text is None:
+                continue
+            try:
+                event = json.loads(text)
+            except json.JSONDecodeError:
+                await websocket.send_json({"type": "error", "detail": "Expected JSON control message."})
+                continue
+            event_type = str(event.get("type") or "").strip().lower()
+            if event_type == "start":
+                next_content_type = event.get("content_type")
+                if isinstance(next_content_type, str) and next_content_type:
+                    content_type = next_content_type[:120]
+                await websocket.send_json({"type": "started", "content_type": content_type})
+            elif event_type == "ping":
+                await websocket.send_json({"type": "pong"})
+            elif event_type == "cancel":
+                await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
+                return
+            elif event_type == "commit":
+                if not chunks:
+                    await websocket.send_json({"type": "error", "detail": "No audio was received."})
+                    continue
+                result = await _create_transcription_from_audio(b"".join(chunks), content_type, request_settings)
+                await websocket.send_json({"type": "final", "result": sanitize_public(result)})
+                await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
+                return
+            else:
+                await websocket.send_json({"type": "error", "detail": f"Unsupported control message type '{event_type}'."})
+    except WebSocketDisconnect:
+        return
+    except TranscriptionInputError as exc:
+        await websocket.send_json({"type": "error", "detail": str(exc)})
+        await websocket.close(code=status.WS_1003_UNSUPPORTED_DATA)
+    except TranscriptionError as exc:
+        await websocket.send_json({"type": "error", "detail": str(exc)})
+        await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+
+
+async def _create_transcription_from_audio(audio: bytes, content_type: str | None, request_settings) -> dict:
+    await record_consent(store, PATIENT_ID, "audio_transcription")
+    result = await ingest_audio_transcription(store, PATIENT_ID, audio, content_type, request_settings)
+    transcript_id = result.get("transcript", {}).get("id")
+    await record_processing_activity(
+        store,
+        PATIENT_ID,
+        "audio_transcription",
+        ["audio", "transcript", "health_context"],
+        transcript_id,
+        request_settings.transcription_provider,
+        "provider_default",
+    )
+    return result
+
+
+def _websocket_write_access(websocket: WebSocket, api_key: str | None) -> bool:
+    if not settings.api_write_key:
+        return True
+    candidate = websocket.headers.get("x-api-key") or api_key
+    return key_matches(candidate, [settings.api_write_key])
+
+
+def _websocket_rate_limit_key(websocket: WebSocket, api_key: str | None, operation: str) -> str:
+    client = websocket.client.host if websocket.client else "unknown"
+    candidate = websocket.headers.get("x-api-key") or api_key or "anonymous"
+    return f"{operation}:{client}:{candidate[:12]}"
 
 
 def transcription_settings_for_language(language: str | None):
