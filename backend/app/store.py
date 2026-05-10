@@ -340,7 +340,7 @@ class PostgresGraphStore(GraphStore):
                 """,
                 node_id,
                 type,
-                json.dumps(payload),
+                json.dumps(self.crypto.encrypt_payload(payload)),
                 created_by,
                 reasoning_log_id,
                 status,

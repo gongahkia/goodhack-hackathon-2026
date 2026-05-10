@@ -94,23 +94,29 @@ class TriageResult(BaseModel):
 
 MEDICATION_NAMES = ("panadol", "paracetamol", "insulin", "metformin", "aspirin", "levodopa")
 MEAL_TERMS = ("breakfast", "lunch", "dinner", "food", "meal")
-RESEARCH_CUES = (
+# Self-sufficient: these terms alone establish a clear care-resource need
+RESEARCH_SELF_SUFFICIENT_CUES = (
+    "wheelchair",
+    "mobility aid",
+    "home modification",
+    "amputation",
+    "amputate",
+    "medical social worker",
     "grant",
     "subsidy",
     "scheme",
     "financial assistance",
-    "wheelchair",
-    "mobility aid",
-    "home modification",
+)
+# Trigger-only: these terms need a corroborating clinical warning to justify research
+RESEARCH_TRIGGER_CUES = (
     "equipment",
-    "amputation",
-    "amputate",
-    "medical social worker",
     "research",
     "find out",
     "look up",
     "what support",
 )
+# Combined set for backward-compat use in audit_research_plan and corpus search
+RESEARCH_CUES = (*RESEARCH_SELF_SUFFICIENT_CUES, *RESEARCH_TRIGGER_CUES)
 WARNING_CUES = ("doctor said", "clinician said", "warned", "risk", "may need", "might need", "likely")
 APPOINTMENT_CUES = ("appointment", "visit", "review", "see the doctor", "physio", "lab")
 BODY_PARTS = ("knee", "leg", "foot", "ankle", "hand", "arm", "eye", "heart", "kidney")
@@ -562,15 +568,21 @@ def _extract_actionables(text: str, entities: ExtractedEntities) -> list[Extract
 
 
 def _has_research_basis(entities: ExtractedEntities) -> bool:
-    text = " ".join(item.description for item in entities.actionables).lower()
-    return _has_research_text(text) or bool(entities.medical_context.risks or entities.medical_context.clinician_warnings)
+    if entities.medical_context.risks or entities.medical_context.clinician_warnings:
+        return True
+    transcript_excerpt = " ".join(item.description for item in entities.actionables)
+    return _has_research_text(transcript_excerpt)
 
 
 def _has_research_text(text: str) -> bool:
     lowered = text.lower()
-    return any(cue in lowered for cue in RESEARCH_CUES) and (
-        any(cue in lowered for cue in WARNING_CUES) or _financial_text(lowered) or any(cue in lowered for cue in ("wheelchair", "equipment", "amputation", "amputate", "research", "find out", "look up"))
-    )
+    # Self-sufficient cues establish a care-resource need on their own
+    if any(cue in lowered for cue in RESEARCH_SELF_SUFFICIENT_CUES):
+        return True
+    # Trigger-only cues need a clinical warning or financial signal to justify research
+    if any(cue in lowered for cue in RESEARCH_TRIGGER_CUES):
+        return any(cue in lowered for cue in WARNING_CUES) or _financial_text(lowered)
+    return False
 
 
 def _looks_like_daily_task(text: str) -> bool:

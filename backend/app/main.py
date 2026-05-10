@@ -58,7 +58,16 @@ store: GraphStore = (
 )
 rate_limiter = InMemoryRateLimiter()
 
+
 app = FastAPI(title=settings.app_name)
+
+
+@app.on_event("startup")
+async def startup():
+    require_pilot_security(settings)
+    if "*" in [origin.strip() for origin in settings.cors_origins.split(",")]:
+        raise RuntimeError("CORS_ORIGINS must be explicit when credentials are enabled.")
+    await store.init()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in settings.cors_origins.split(",")],
@@ -75,14 +84,6 @@ async def security_headers(request: Request, call_next):
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     response.headers.setdefault("Cache-Control", "no-store")
     return response
-
-
-@app.on_event("startup")
-async def startup() -> None:
-    require_pilot_security(settings)
-    if "*" in [origin.strip() for origin in settings.cors_origins.split(",")]:
-        raise RuntimeError("CORS_ORIGINS must be explicit when credentials are enabled.")
-    await store.init()
 
 
 @app.get("/health")
