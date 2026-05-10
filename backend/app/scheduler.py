@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from .calendar_auth import resolve_google_calendar_credentials
+from .calendar_auth import refresh_env_google_calendar_access_token, resolve_google_calendar_credentials
 from .config import PATIENT_TZ, Settings
 from .models import Node
 from .security import vendor_allowed
@@ -59,6 +59,11 @@ class GoogleCalendarProvider:
         headers = {"Authorization": f"Bearer {credentials.access_token}"}
         async with httpx.AsyncClient(timeout=20) as client:
             response = await client.get(url, params=params, headers=headers)
+            if response.status_code == 401 and credentials.source == "demo_env":
+                refreshed_token = await refresh_env_google_calendar_access_token(self.settings)
+                if refreshed_token:
+                    headers = {"Authorization": f"Bearer {refreshed_token}"}
+                    response = await client.get(url, params=params, headers=headers)
             response.raise_for_status()
         return [_calendar_event_from_google(item, start_at.tzinfo or SINGAPORE_TZ) for item in response.json().get("items", [])]
 
@@ -73,7 +78,7 @@ async def build_day_schedule(
     window_start = datetime.combine(target_date, time.min, tzinfo=SINGAPORE_TZ)
     window_end = window_start + timedelta(days=1)
     provider = calendar_provider or GoogleCalendarProvider(settings, store, patient_id)
-    events = await provider.list_events(window_start, window_end)
+    events, calendar_error = await _safe_list_events(provider, window_start, window_end)
     tasks = [node for node in await store.list_nodes(patient_id, ["daily_task"]) if node.status != "dismissed"]
 
     items: list[dict[str, Any]] = []
@@ -96,7 +101,28 @@ async def build_day_schedule(
         "items": sorted(items, key=_schedule_item_sort_key),
         "calendar_events": [_calendar_event_payload(event) for event in events],
         "conflicts": conflicts,
+        "calendar_error": calendar_error,
     }
+
+
+async def _safe_list_events(provider: CalendarProvider, start_at: datetime, end_at: datetime) -> tuple[list[CalendarEvent], dict[str, Any] | None]:
+    try:
+        return await provider.list_events(start_at, end_at), None
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code
+        SCHEDULER_LOG.warning("calendar read failed with status %s", status_code)
+        return [], {
+            "provider": "google_calendar",
+            "status_code": status_code,
+            "message": "Google Calendar read failed; check access token.",
+        }
+    except httpx.HTTPError:
+        SCHEDULER_LOG.warning("calendar read failed", exc_info=True)
+        return [], {
+            "provider": "google_calendar",
+            "status_code": None,
+            "message": "Google Calendar read failed.",
+        }
 
 
 async def run_next_day_schedule_check(

@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     vendor_allowed_purposes: str = ""
     google_calendar_id: str = "primary"
     google_calendar_access_token: str | None = Field(default=None, repr=False)
+    google_calendar_refresh_token: str | None = Field(default=None, repr=False)
     google_calendar_api_base_url: str = "https://www.googleapis.com/calendar/v3"
     google_calendar_oauth_enabled: bool = False
     google_oauth_client_id: str | None = Field(default=None, repr=False)

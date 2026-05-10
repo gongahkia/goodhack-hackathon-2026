@@ -82,6 +82,7 @@ async def test_transcript_can_create_daily_research_and_appointment_buckets_with
     assert len(result["appointment_candidates"]) == 1
 
     research = result["ad_hoc_research_tasks"][0]["payload"]
+    assert research["display_title"] == "Research financial support options"
     assert research["basis"]
     assert "PERSON_" not in research["basis"]
     assert research["requires_guardrail_review"] is True
@@ -95,6 +96,21 @@ async def test_transcript_can_create_daily_research_and_appointment_buckets_with
     assert appointment["requires_clarification"] is True
     assert appointment["requires_calendar_write"] is False  # gated until user confirms year
     assert appointment["calendar_write_status"] == "needs_clarification"
+
+
+@pytest.mark.asyncio
+async def test_information_sheet_request_surfaces_as_reviewable_research_task():
+    store = MemoryGraphStore()
+    transcript = await _transcript(store, "Prepare for me a sheet for amputation.")
+    redaction = await redact_stored_transcript(store, transcript)
+
+    result = await process_redacted_transcript(store, redaction, reference_date=date(2026, 5, 10))
+
+    assert result["daily_tasks"] == []
+    assert result["appointment_candidates"] == []
+    assert len(result["ad_hoc_research_tasks"]) == 1
+    research = result["ad_hoc_research_tasks"][0]["payload"]
+    assert research["display_title"] == "Prepare amputation information sheet"
 
 
 @pytest.mark.asyncio

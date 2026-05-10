@@ -124,6 +124,13 @@ async def resolve_google_calendar_credentials(settings: Settings, store: GraphSt
     return None
 
 
+async def refresh_env_google_calendar_access_token(settings: Settings) -> str | None:
+    if not (settings.google_calendar_refresh_token and settings.google_oauth_client_id and settings.google_oauth_client_secret):
+        return None
+    refreshed = await _refresh_access_token(settings, settings.google_calendar_refresh_token)
+    return str(refreshed.get("access_token")) if refreshed.get("access_token") else None
+
+
 async def _valid_oauth_access_token(store: GraphStore, account: Node, settings: Settings) -> str | None:
     token = account.payload.get("access_token")
     expires_at = _parse_datetime(account.payload.get("access_token_expires_at"))

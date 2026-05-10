@@ -176,6 +176,33 @@ async def test_day_schedule_returns_scheduled_goal_and_live_calendar_conflict():
 
 
 @pytest.mark.asyncio
+async def test_day_schedule_degrades_when_calendar_read_fails():
+    class FailingCalendarProvider:
+        async def list_events(self, start_at: datetime, end_at: datetime) -> list[CalendarEvent]:
+            request = httpx.Request("GET", "https://www.googleapis.com/calendar/v3/calendars/primary/events")
+            response = httpx.Response(401, request=request)
+            raise httpx.HTTPStatusError("unauthorized", request=request, response=response)
+
+    store = MemoryGraphStore()
+    await store.create_node(
+        "daily_task",
+        {"patient_id": "patient-1", "title": "Aspirin", "scheduled_time": "08:00"},
+        "agent",
+        status="approved",
+    )
+
+    result = await build_day_schedule(store, "patient-1", Settings(), datetime(2026, 5, 10, tzinfo=SINGAPORE_TZ).date(), calendar_provider=FailingCalendarProvider())
+
+    assert result["calendar_events"] == []
+    assert result["calendar_error"] == {
+        "provider": "google_calendar",
+        "status_code": 401,
+        "message": "Google Calendar read failed; check access token.",
+    }
+    assert result["items"][0]["title"] == "Aspirin"
+
+
+@pytest.mark.asyncio
 async def test_google_calendar_provider_uses_next_day_event_list_parameters(monkeypatch):
     captured: dict[str, object] = {}
 
@@ -215,6 +242,53 @@ async def test_google_calendar_provider_uses_next_day_event_list_parameters(monk
     assert captured["headers"] == {"Authorization": "Bearer token"}
     assert events[0].start_at.hour == 11
     assert events[0].start_at.tzinfo == SINGAPORE_TZ
+
+
+@pytest.mark.asyncio
+async def test_google_calendar_provider_refreshes_env_access_token_after_401(monkeypatch):
+    get_headers: list[dict[str, str]] = []
+    post_payloads: list[dict[str, str | None]] = []
+
+    async def fake_get(self, url, params=None, headers=None):
+        get_headers.append(dict(headers or {}))
+        if len(get_headers) == 1:
+            return httpx.Response(401, request=httpx.Request("GET", url))
+        return httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "id": "event-1",
+                        "summary": "Busy",
+                        "start": {"dateTime": "2026-05-10T03:15:00Z"},
+                        "end": {"dateTime": "2026-05-10T04:15:00Z"},
+                    }
+                ]
+            },
+            request=httpx.Request("GET", url),
+        )
+
+    async def fake_post(self, url, data=None):
+        post_payloads.append(dict(data or {}))
+        return httpx.Response(200, json={"access_token": "fresh-token", "expires_in": 3600}, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    provider = GoogleCalendarProvider(
+        Settings(
+            google_calendar_access_token="expired-token",
+            google_calendar_refresh_token="refresh-token",
+            google_oauth_client_id="client-id",
+            google_oauth_client_secret="client-secret",
+            google_calendar_id="primary",
+        )
+    )
+
+    events = await provider.list_events(datetime(2026, 5, 10, tzinfo=SINGAPORE_TZ), datetime(2026, 5, 11, tzinfo=SINGAPORE_TZ))
+
+    assert get_headers == [{"Authorization": "Bearer expired-token"}, {"Authorization": "Bearer fresh-token"}]
+    assert post_payloads[0]["refresh_token"] == "refresh-token"
+    assert events[0].id == "event-1"
 
 
 @pytest.mark.asyncio

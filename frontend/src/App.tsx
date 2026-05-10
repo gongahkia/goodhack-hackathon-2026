@@ -126,6 +126,7 @@ export default function App() {
       await Promise.allSettled([getScheduleConflicts(), getNotifications()])
       setTasks(prev => tasksFromBackend(schedule, appointments, researchTasks, recommendations, [...prev, ...extraManual]))
       setConflicts(conflictsFromSchedule(schedule))
+      if (schedule.calendar_error) console.warn('Calendar read failed', schedule.calendar_error)
       setApiError(null)
     } catch (error) {
       setApiError(error instanceof Error ? error.message : 'Backend request failed')

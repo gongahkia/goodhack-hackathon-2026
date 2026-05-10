@@ -50,6 +50,15 @@ function taskDetail(node: BackendNode): string | undefined {
     ?? str(node.payload.original_instruction_redacted)
 }
 
+function compact(value: string | undefined, max = 110): string | undefined {
+  if (!value) return undefined
+  return value.length > max ? `${value.slice(0, max - 3).trimEnd()}...` : value
+}
+
+function cleanResearchQuestion(value: string | undefined): string | undefined {
+  return str(value?.replace(/^What support, grants, equipment, or care steps should be checked for:\s*/i, ''))
+}
+
 export function reviewTasksFromProcess(result: ProcessTranscriptionResponse): Task[] {
   const daily = result.daily_tasks.map(node => {
     const time = timeLabelFromHHMM(node.payload.scheduled_time ?? node.payload.time)
@@ -116,7 +125,7 @@ export function dailyPatchFromTask(task: Task): Record<string, unknown> {
 
 export function nodePatchFromTask(task: Task): Record<string, unknown> {
   if (task.backendType === 'ad_hoc_research_task') {
-    return { question: task.title, basis: task.detail ?? '' }
+    return { display_title: task.title }
   }
   if (task.backendType === 'appointment_candidate') {
     return { title: task.title, date: task.dueDate, notes: task.detail ?? '' }
@@ -143,11 +152,13 @@ function appointmentTask(node: BackendNode): Task {
 }
 
 function researchTask(node: BackendNode): Task {
+  const question = str(node.payload.question)
+  const basis = str(node.payload.basis) ?? cleanResearchQuestion(question)
   return {
     id: node.id,
     category: 'adhoc',
-    title: str(node.payload.question) ?? str(node.payload.title) ?? 'Research task',
-    detail: taskDetail(node),
+    title: str(node.payload.display_title) ?? str(node.payload.title) ?? 'Research support options',
+    detail: str(node.payload.summary) ?? (basis ? `Checking support options for: ${compact(basis)}` : taskDetail(node)),
     completed: false,
     researchStatus: str(node.payload.research_status) ?? node.status,
     nextSteps: [{ label: node.status === 'approved' ? 'Research ready' : 'Research running' }],

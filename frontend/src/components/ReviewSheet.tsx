@@ -177,7 +177,7 @@ export default function ReviewSheet({ open, initialTasks, onConfirm, onBack }: P
             {upcoming.map(t => (
               <ReviewRow
                 key={t.id}
-                chip={t.dueDate ? formatShortDate(t.dueDate) : '—'}
+                chip={t.dueDate ? formatShortDate(t.dueDate) : (t.backendType === 'ad_hoc_research_task' ? 'Research' : '—')}
                 chipColor={colors.statusUrgent}
                 chipBg={colors.statusUrgentLight}
                 title={t.title}

@@ -992,6 +992,7 @@ async def _create_research_task(
     description = rehydrate_placeholders(actionable.description, placeholder_map)
     payload = {
         "patient_id": patient_id,
+        "display_title": _research_display_title(description),
         "question": _research_question(description),
         "question_redacted": _research_question(actionable.description),
         "source_status": "pending_guardrail",
@@ -1148,3 +1149,16 @@ def _research_question(description: str) -> str:
     if "?" in description:
         return description
     return f"What support, grants, equipment, or care steps should be checked for: {description}"
+
+
+def _research_display_title(description: str) -> str:
+    lowered = description.lower()
+    if any(term in lowered for term in ("sheet", "handout", "guide", "checklist")):
+        if "amputation" in lowered:
+            return "Prepare amputation information sheet"
+        return "Prepare care information sheet"
+    if any(term in lowered for term in ("grant", "subsidy", "subsidies", "careshield", "financial")):
+        return "Research financial support options"
+    if any(term in lowered for term in ("equipment", "wheelchair", "mobility", "cane", "walker")):
+        return "Research equipment support options"
+    return "Research support options"
