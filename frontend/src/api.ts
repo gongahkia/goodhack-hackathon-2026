@@ -69,15 +69,32 @@ function apiUrl(path: string) {
   return `${API_BASE_URL}${path}`
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function responseError(response: Response): Promise<string> {
+  const body = await response.text()
+  try {
+    const parsed = JSON.parse(body) as { detail?: unknown }
+    if (typeof parsed.detail === 'string') return parsed.detail
+  } catch {}
+  if (body.includes('FUNCTION_INVOCATION_FAILED')) return 'Backend request failed. Restart with make fresh-dev and retry.'
+  return body || `Request failed: ${response.status}`
+}
+
+async function request<T>(path: string, init: RequestInit = {}, timeoutMs = 30000): Promise<T> {
   const headers = new Headers(init.headers)
   if (API_KEY) headers.set('X-API-Key', API_KEY)
-  const response = await fetch(apiUrl(path), { ...init, headers })
-  if (!response.ok) {
-    const detail = await response.text()
-    throw new Error(detail || `Request failed: ${response.status}`)
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(apiUrl(path), { ...init, headers, signal: controller.signal })
+    if (!response.ok) throw new Error(await responseError(response))
+    return response.json() as Promise<T>
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('Backend request timed out. Restart with make fresh-dev and retry.')
+    if (error instanceof TypeError) throw new Error('Backend is unreachable. Check make dev and retry.')
+    throw error
+  } finally {
+    window.clearTimeout(timeout)
   }
-  return response.json() as Promise<T>
 }
 
 export function createTranscription(audio: Blob, language = 'en') {
@@ -85,7 +102,7 @@ export function createTranscription(audio: Blob, language = 'en') {
     method: 'POST',
     body: audio,
     headers: { 'Content-Type': audio.type || 'audio/webm' },
-  })
+  }, 60000)
 }
 
 export function processTranscription(sessionId: string) {
