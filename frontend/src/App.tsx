@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { colors, font, radius, spacing, shadow } from './tokens'
 import type { Task, TaskCategory } from './types'
-import { sampleTasks } from './data/sampleData'
 import DailyTaskRow from './components/DailyTaskRow'
 import DailyGoalRow from './components/DailyGoalRow'
 import TaskRow from './components/TaskRow'
@@ -11,20 +10,27 @@ import ReviewSheet from './components/ReviewSheet'
 import StatusBar from './components/StatusBar'
 import TaskDetailSheet from './components/TaskDetailSheet'
 import ConflictPanel, { type ConflictItem } from './components/ConflictPanel'
-
-// ─── Mock calendar conflict ───────────────────────────────────────────────────
-
-const MOCK_CONFLICTS: ConflictItem[] = [
-  {
-    id: 'cal-1',
-    eventTitle: 'Lunch with Mandy',
-    startLabel: '11:00 AM',
-    endLabel: '3:00 PM',
-    startMin: 660,
-    endMin: 900,
-    acknowledged: false,
-  },
-]
+import {
+  approveAppointmentCalendarWrite,
+  getAppointments,
+  getNotifications,
+  getRecommendations,
+  getResearchTasks,
+  getScheduleConflicts,
+  getScheduleDay,
+  processTranscription,
+  runResearchTask,
+  updateDailyTask,
+  updateNode,
+  updateNodeStatus,
+} from './api'
+import {
+  conflictsFromSchedule,
+  dailyPatchFromTask,
+  nodePatchFromTask,
+  reviewTasksFromProcess,
+  tasksFromBackend,
+} from './backendMapping'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -42,6 +48,11 @@ function getGreeting() {
   return 'Good evening'
 }
 
+function todayIso() {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+
 function parseTaskMinutes(timeLabel: string): number {
   const [time, period] = timeLabel.split(' ')
   const [h, m] = time.split(':').map(Number)
@@ -49,6 +60,10 @@ function parseTaskMinutes(timeLabel: string): number {
   if (period === 'PM' && h !== 12) hours += 12
   if (period === 'AM' && h === 12) hours = 0
   return hours * 60 + m
+}
+
+function taskChanged(a: Task | undefined, b: Task) {
+  return !a || a.title !== b.title || a.detail !== b.detail || a.timeLabel !== b.timeLabel || a.dueDate !== b.dueDate
 }
 
 function getCurrentTaskId(tasks: Task[]): string | null {
@@ -76,7 +91,9 @@ export default function App() {
   const [captureOpen, setCaptureOpen] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
+  const [reviewInitialTasks, setReviewInitialTasks] = useState<Task[]>([])
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  const [apiError, setApiError] = useState<string | null>(null)
   const [createDefaults, setCreateDefaults] = useState<{
     category: 'daily' | 'adhoc'
     noFixedTime?: boolean
@@ -84,7 +101,7 @@ export default function App() {
   const [goalsExpanded, setGoalsExpanded] = useState(false)
 
   // Conflict state
-  const [conflicts, setConflicts] = useState<ConflictItem[]>(MOCK_CONFLICTS)
+  const [conflicts, setConflicts] = useState<ConflictItem[]>([])
   const [bellOpen, setBellOpen] = useState(false)
   // Y position within app container when rail is tapped; null = closed
   const [conflictPopupY, setConflictPopupY] = useState<number | null>(null)
@@ -98,12 +115,33 @@ export default function App() {
   const touchStart = useRef<{ x: number; y: number } | null>(null)
   const lockDir = useRef<'h' | 'v' | null>(null)
 
+  async function refreshFromBackend(extraManual: Task[] = []) {
+    try {
+      const [schedule, appointments, researchTasks, recommendations] = await Promise.all([
+        getScheduleDay(todayIso()),
+        getAppointments(),
+        getResearchTasks(),
+        getRecommendations(),
+      ])
+      await Promise.allSettled([getScheduleConflicts(), getNotifications()])
+      setTasks(prev => tasksFromBackend(schedule, appointments, researchTasks, recommendations, [...prev, ...extraManual]))
+      setConflicts(conflictsFromSchedule(schedule))
+      setApiError(null)
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : 'Backend request failed')
+    }
+  }
+
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
     const ro = new ResizeObserver(([e]) => setContainerWidth(e.contentRect.width))
     ro.observe(el)
     return () => ro.disconnect()
+  }, [])
+
+  useEffect(() => {
+    void refreshFromBackend()
   }, [])
 
   const tabIndex = tab === 'daily' ? 0 : 1
@@ -153,9 +191,20 @@ export default function App() {
     setTasks(prev => prev.map(t => (t.id === id ? { ...t, completed: !t.completed } : t)))
   }
 
-  function updateTask(updated: Task) {
+  async function updateTask(updated: Task) {
     setTasks(prev => prev.map(t => (t.id === updated.id ? updated : t)))
     setSelectedTask(null)
+    if (!updated.backendNodeId) return
+    try {
+      if (updated.backendType === 'daily_task') {
+        await updateDailyTask(updated.backendNodeId, dailyPatchFromTask(updated))
+      } else {
+        await updateNode(updated.backendNodeId, nodePatchFromTask(updated), 'edited')
+      }
+      await refreshFromBackend()
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : 'Task update failed')
+    }
   }
 
   function createTask(t: Task) {
@@ -163,9 +212,78 @@ export default function App() {
     setCreateDefaults(null)
   }
 
-  function deleteTask(id: string) {
+  async function deleteTask(id: string) {
+    const task = tasks.find(t => t.id === id)
     setTasks(prev => prev.filter(t => t.id !== id))
     setSelectedTask(null)
+    if (!task?.backendNodeId) return
+    try {
+      await updateNodeStatus(task.backendNodeId, 'dismissed')
+      await refreshFromBackend()
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : 'Task delete failed')
+    }
+  }
+
+  async function handleRecordingComplete(recording: { transcriptionSessionId: string }) {
+    try {
+      const result = await processTranscription(recording.transcriptionSessionId)
+      setReviewInitialTasks(reviewTasksFromProcess(result))
+      setReviewOpen(true)
+      setApiError(null)
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : 'Care-plan extraction failed')
+    }
+  }
+
+  async function handleReviewConfirm(items: Task[]) {
+    const kept = items.filter(t => t.title.trim())
+    const keptBackendIds = new Set(kept.map(t => t.backendNodeId).filter(Boolean))
+    const originalByBackendId = new Map(reviewInitialTasks.filter(t => t.backendNodeId).map(t => [t.backendNodeId, t]))
+    const manual = kept.filter(t => !t.backendNodeId)
+    try {
+      await Promise.all(
+        reviewInitialTasks
+          .filter(t => t.backendNodeId && !keptBackendIds.has(t.backendNodeId))
+          .map(t => updateNodeStatus(t.backendNodeId!, 'dismissed')),
+      )
+      for (const item of kept) {
+        if (!item.backendNodeId) continue
+        const original = originalByBackendId.get(item.backendNodeId)
+        if (taskChanged(original, item)) {
+          if (item.backendType === 'daily_task') {
+            await updateDailyTask(item.backendNodeId, dailyPatchFromTask(item))
+          } else {
+            await updateNode(item.backendNodeId, nodePatchFromTask(item), 'edited')
+          }
+        }
+        await updateNodeStatus(item.backendNodeId, 'approved')
+      }
+      setReviewOpen(false)
+      setIsRecording(false)
+      setCaptureOpen(false)
+      await refreshFromBackend(manual)
+      void runConfirmedResearch(kept)
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : 'Review save failed')
+    }
+  }
+
+  async function runConfirmedResearch(items: Task[]) {
+    const ids = items.filter(t => t.backendType === 'ad_hoc_research_task' && t.backendNodeId).map(t => t.backendNodeId!)
+    if (!ids.length) return
+    await Promise.allSettled(ids.map(runResearchTask))
+    await refreshFromBackend()
+  }
+
+  async function handleApproveCalendar(task: Task) {
+    if (!task.backendNodeId) return
+    try {
+      await approveAppointmentCalendarWrite(task.backendNodeId)
+      await refreshFromBackend()
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : 'Calendar approval failed')
+    }
   }
 
   /** Called by DailyTaskRow when user taps a conflicting rail line. */
@@ -219,6 +337,26 @@ export default function App() {
       }}
     >
       <StatusBar />
+      {apiError && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 48,
+            left: spacing.lg,
+            right: spacing.lg,
+            zIndex: 20,
+            padding: `${spacing.sm} ${spacing.md}`,
+            borderRadius: radius.sm,
+            background: colors.statusUrgentLight,
+            color: colors.statusUrgent,
+            fontSize: font.size.xs,
+            fontWeight: font.weight.medium,
+            lineHeight: 1.35,
+          }}
+        >
+          {apiError}
+        </div>
+      )}
 
       {/* ── Header ── */}
       <div
@@ -744,6 +882,7 @@ export default function App() {
         onUpdate={updateTask}
         onCreate={createTask}
         onDelete={deleteTask}
+        onApproveCalendar={handleApproveCalendar}
       />
 
       <CaptureSheet
@@ -757,9 +896,7 @@ export default function App() {
 
       <VoiceRecordingPanel
         open={isRecording}
-        onComplete={() => {
-          setReviewOpen(true)
-        }}
+        onComplete={handleRecordingComplete}
         onCancel={() => {
           setIsRecording(false)
           setCaptureOpen(false)
@@ -768,14 +905,9 @@ export default function App() {
 
       <ReviewSheet
         open={reviewOpen}
-        initialTasks={sampleTasks}
+        initialTasks={reviewInitialTasks}
         onBack={() => setReviewOpen(false)}
-        onConfirm={items => {
-          setTasks(items)
-          setReviewOpen(false)
-          setIsRecording(false)
-          setCaptureOpen(false)
-        }}
+        onConfirm={items => void handleReviewConfirm(items)}
       />
 
       {/* Conflict rail popup — anchored near where user tapped */}
