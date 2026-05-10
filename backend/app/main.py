@@ -8,6 +8,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Res
 from fastapi.middleware.cors import CORSMiddleware
 
 from .approvals import approve_appointment_calendar_write, update_daily_task
+from .calendar_auth import create_google_oauth_authorization, disconnect_google_calendar_account, link_google_calendar_account, active_google_calendar_account
 from .compliance import (
     ConsentRecordCreate,
     DataSubjectRequestCreate,
@@ -24,12 +25,12 @@ from .extraction import process_redacted_transcript
 from .graph_queries import backtrace_sources
 from .identity import ensure_patient_identity, known_people_for_redaction, learn_alias_candidates_from_transcript, upsert_patient_alias
 from .learning import build_learning_context, create_model_evaluation, create_prompt_candidate, list_model_evaluations, list_prompt_candidates
-from .models import CaregiverNoteCreate, ClarificationUpdate, HumanEvaluationCreate, IdentityAliasCreate, ModelEvaluationCreate, Node, NodeEdit, PromptCandidateCreate, StatusUpdate
+from .models import CaregiverNoteCreate, ClarificationUpdate, HumanEvaluationCreate, IdentityAliasCreate, ModelEvaluationCreate, Node, NodeEdit, PromptCandidateCreate, ScheduleConflictResolutionCreate, StatusUpdate
 from .notifications import build_notifications
 from .patient import PATIENT, PATIENT_ID
 from .privacy import PiiRedactor, sanitize_audit_payload
 from .research import run_guarded_research_pipeline
-from .scheduler import daily_scheduler_loop, run_next_day_schedule_check
+from .scheduler import daily_scheduler_loop, list_active_schedule_conflicts, resolve_schedule_conflict, run_next_day_schedule_check, run_next_day_schedule_check_once
 from .security import InMemoryRateLimiter, key_matches, rate_limit_key, require_pilot_security, sanitize_public
 from .transcript_pipeline import ingest_audio_transcription, redact_stored_transcript
 from .store import GraphStore, MemoryGraphStore, PostgresGraphStore
@@ -126,6 +127,14 @@ def require_write_access(x_api_key: str | None = Header(default=None)) -> None:
         raise HTTPException(401, "A valid X-API-Key is required for this operation.")
 
 
+def require_cron_access(x_cron_key: str | None = Header(default=None), x_api_key: str | None = Header(default=None)) -> None:
+    if settings.scheduler_cron_key:
+        if not key_matches(x_cron_key, [settings.scheduler_cron_key]):
+            raise HTTPException(401, "A valid X-Cron-Key is required for this operation.")
+        return
+    require_write_access(x_api_key)
+
+
 def require_clinician_access(x_clinician_key: str | None = Header(default=None), x_api_key: str | None = Header(default=None)) -> None:
     if settings.clinician_review_key:
         if not key_matches(x_clinician_key, [settings.clinician_review_key]):
@@ -210,6 +219,47 @@ async def calendar_feed() -> Response:
         build_calendar_ics(active, f"{PATIENT.name} Care Plan"),
         media_type="text/calendar; charset=utf-8",
     )
+
+
+@app.get("/calendar/google/connect", dependencies=[Depends(require_write_access)])
+async def google_calendar_connect() -> dict:
+    if not settings.google_calendar_oauth_enabled:
+        raise HTTPException(404, "Google Calendar OAuth is disabled.")
+    try:
+        return sanitize_public(await create_google_oauth_authorization(store, PATIENT_ID, settings))
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+@app.get("/calendar/google/callback")
+async def google_calendar_callback(code: str, state: str) -> dict:
+    if not settings.google_calendar_oauth_enabled:
+        raise HTTPException(404, "Google Calendar OAuth is disabled.")
+    try:
+        account = await link_google_calendar_account(store, PATIENT_ID, settings, code, state)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, "Google Calendar OAuth callback failed.") from exc
+    return sanitize_public(account.model_dump(mode="json"))
+
+
+@app.get("/calendar/google/status", dependencies=[Depends(require_read_access)])
+async def google_calendar_status() -> dict:
+    if not settings.google_calendar_oauth_enabled:
+        raise HTTPException(404, "Google Calendar OAuth is disabled.")
+    account = await active_google_calendar_account(store, PATIENT_ID)
+    return sanitize_public({"enabled": True, "linked": bool(account), "calendar_account": account.model_dump(mode="json") if account else None})
+
+
+@app.delete("/calendar/google/disconnect", dependencies=[Depends(require_write_access)])
+async def google_calendar_disconnect() -> dict:
+    if not settings.google_calendar_oauth_enabled:
+        raise HTTPException(404, "Google Calendar OAuth is disabled.")
+    account = await disconnect_google_calendar_account(store, PATIENT_ID)
+    return sanitize_public({"disconnected": bool(account), "calendar_account": account.model_dump(mode="json") if account else None})
 
 
 @app.get("/memory", dependencies=[Depends(require_read_access)])
@@ -497,6 +547,38 @@ async def patch_daily_task(task_id: UUID, patch: dict) -> dict:
 @app.post("/scheduler/next-day-check", dependencies=[Depends(require_write_access)])
 async def scheduler_next_day_check() -> dict:
     return sanitize_public(await run_next_day_schedule_check(store, PATIENT_ID, settings))
+
+
+@app.post("/scheduler/cron/next-day-check", dependencies=[Depends(require_cron_access)])
+async def scheduler_cron_next_day_check(force: bool = Query(False)) -> dict:
+    return sanitize_public(await run_next_day_schedule_check_once(store, PATIENT_ID, settings, force=force))
+
+
+@app.get("/schedule-conflicts", dependencies=[Depends(require_read_access)])
+async def schedule_conflicts() -> list[dict]:
+    conflicts = await list_active_schedule_conflicts(store, PATIENT_ID, settings)
+    return sanitize_public([node.model_dump(mode="json") for node in conflicts])
+
+
+@app.post("/schedule-conflicts/{conflict_id}/resolve", dependencies=[Depends(require_write_access)])
+async def resolve_conflict(conflict_id: UUID, resolution: ScheduleConflictResolutionCreate) -> dict:
+    conflict = await store.get_node(conflict_id)
+    if not conflict or conflict.type != "schedule_conflict":
+        raise HTTPException(404, "Schedule conflict not found")
+    try:
+        return sanitize_public(
+            await resolve_schedule_conflict(
+                store,
+                PATIENT_ID,
+                conflict,
+                settings,
+                resolution.action,
+                resolution.scheduled_time,
+                resolution.reason,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.get("/research/tasks", dependencies=[Depends(require_read_access)])

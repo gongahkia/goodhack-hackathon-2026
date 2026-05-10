@@ -63,9 +63,17 @@ class Settings(BaseSettings):
     google_calendar_id: str = "primary"
     google_calendar_access_token: str | None = Field(default=None, repr=False)
     google_calendar_api_base_url: str = "https://www.googleapis.com/calendar/v3"
+    google_calendar_oauth_enabled: bool = False
+    google_oauth_client_id: str | None = Field(default=None, repr=False)
+    google_oauth_client_secret: str | None = Field(default=None, repr=False)
+    google_oauth_redirect_uri: str | None = None
+    google_oauth_auth_url: str = "https://accounts.google.com/o/oauth2/v2/auth"
+    google_oauth_token_url: str = "https://oauth2.googleapis.com/token"
+    google_oauth_userinfo_url: str = "https://www.googleapis.com/oauth2/v3/userinfo"
     scheduler_enabled: bool = True
     scheduler_run_hour: int = 22  # patient-tz hour for daily next-day check
     scheduler_run_minute: int = 0
+    scheduler_cron_key: str | None = Field(default=None, repr=False)
 
     model_config = SettingsConfigDict(env_file=(REPO_ROOT / ".env", BACKEND_ROOT / ".env"), env_file_encoding="utf-8", extra="ignore")
 

@@ -22,8 +22,11 @@ SENSITIVE_FIELD_NAMES = {
     "error",
     "raw_response",
     "content",
+    "access_token",
+    "refresh_token",
+    "id_token",
 }
-SENSITIVE_NODE_TYPES = {"transcript", "pii_redaction", "calendar_write_request"}
+SENSITIVE_NODE_TYPES = {"transcript", "pii_redaction", "calendar_write_request", "calendar_account"}
 
 
 def key_matches(candidate: str | None, allowed: list[str | None]) -> bool:

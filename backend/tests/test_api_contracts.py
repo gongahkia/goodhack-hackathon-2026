@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -7,6 +8,7 @@ from starlette.websockets import WebSocketDisconnect
 import app.main as main
 import app.transcript_pipeline as transcript_pipeline
 from app.config import Settings
+from app.scheduler import SINGAPORE_TZ
 from app.store import MemoryGraphStore
 from app.transcription import TranscriptionResult
 
@@ -66,6 +68,42 @@ def test_patient_read_and_write_endpoints_require_api_key_but_health_is_public(m
     assert allowed_read.status_code == 200
     assert allowed.status_code == 200
     assert allowed.json()["target_date"]
+
+
+def test_google_calendar_oauth_routes_are_disabled_by_default(monkeypatch):
+    _install_test_app(monkeypatch)
+
+    with TestClient(main.app) as client:
+        connect = client.get("/calendar/google/connect", headers=_headers())
+        status = client.get("/calendar/google/status", headers=_headers())
+
+    assert connect.status_code == 404
+    assert status.status_code == 404
+
+
+def test_scheduler_cron_endpoint_requires_cron_key_and_is_idempotent(monkeypatch):
+    store = _install_test_app(monkeypatch)
+    monkeypatch.setattr(main, "settings", Settings(api_write_key=API_KEY, scheduler_cron_key="cron-key", google_calendar_access_token=None))
+
+    async def seed_task():
+        return await store.create_node(
+            "daily_task",
+            {"patient_id": "mdm-tan", "title": "Give Panadol before lunch", "timing_relation": "before lunch", "scheduling_semantics": "fixed_clinical"},
+            "agent",
+        )
+
+    asyncio.run(seed_task())
+
+    with TestClient(main.app) as client:
+        blocked = client.post("/scheduler/cron/next-day-check", headers={"X-Cron-Key": "wrong"})
+        first = client.post("/scheduler/cron/next-day-check", headers={"X-Cron-Key": "cron-key"})
+        second = client.post("/scheduler/cron/next-day-check", headers={"X-Cron-Key": "cron-key"})
+
+    assert blocked.status_code == 401
+    assert first.status_code == 200
+    assert first.json()["already_ran"] is False
+    assert second.status_code == 200
+    assert second.json()["already_ran"] is True
 
 
 def test_transcript_first_api_flow_is_idempotent_and_preserves_user_facing_pii(monkeypatch):
@@ -160,6 +198,74 @@ def test_daily_task_edit_route_validates_overrides_and_records_feedback(monkeypa
     feedback = asyncio.run(store.list_nodes("mdm-tan", ["caregiver_feedback"]))
     assert len(feedback) == 1
     assert feedback[0].payload["target_node_id"] == str(task.id)
+
+
+def test_schedule_conflict_resolution_rejects_collision_then_accepts_safe_custom_time(monkeypatch):
+    store = _install_test_app(monkeypatch)
+
+    async def seed_conflict():
+        task = await store.create_node(
+            "daily_task",
+            {
+                "patient_id": "mdm-tan",
+                "title": "Morning walk",
+                "timing_relation": "morning",
+                "scheduling_semantics": "movable_routine",
+                "estimated_duration_minutes": 30,
+            },
+            "agent",
+        )
+        await store.create_node(
+            "appointment_candidate",
+            {
+                "patient_id": "mdm-tan",
+                "title": "Existing appointment",
+                "date": "2026-05-11",
+                "time": "10:00",
+                "requires_calendar_write": True,
+                "calendar_write_status": "pending_user_approval",
+            },
+            "agent",
+        )
+        conflict = await store.create_node(
+            "schedule_conflict",
+            {
+                "patient_id": "mdm-tan",
+                "daily_task_id": str(task.id),
+                "category": "next_day_conflict_warning",
+                "classification": "movable",
+                "reason": "Morning walk conflicts with calendar event.",
+                "task_time": {
+                    "start_at": datetime(2026, 5, 11, 9, 0, tzinfo=SINGAPORE_TZ).isoformat(),
+                    "end_at": datetime(2026, 5, 11, 9, 30, tzinfo=SINGAPORE_TZ).isoformat(),
+                },
+                "suggested_time": datetime(2026, 5, 11, 10, 0, tzinfo=SINGAPORE_TZ).isoformat(),
+            },
+            "system",
+            status="pending_review",
+        )
+        return task, conflict
+
+    task, conflict = asyncio.run(seed_conflict())
+
+    with TestClient(main.app) as client:
+        listed = client.get("/schedule-conflicts", headers=_headers())
+        rejected = client.post(f"/schedule-conflicts/{conflict.id}/resolve", headers=_headers(), json={"action": "accept_suggested_time"})
+        accepted = client.post(
+            f"/schedule-conflicts/{conflict.id}/resolve",
+            headers=_headers(),
+            json={"action": "custom_time", "scheduled_time": "11:00", "reason": "Caregiver picked a clear slot."},
+        )
+
+    assert listed.status_code == 200
+    assert listed.json()[0]["id"] == str(conflict.id)
+    assert rejected.status_code == 200
+    assert rejected.json()["accepted"] is False
+    assert accepted.status_code == 200
+    assert accepted.json()["accepted"] is True
+    updated = asyncio.run(store.get_node(task.id))
+    assert updated.payload["user_override"]["scheduled_time"] == "11:00"
+    assert accepted.json()["schedule_conflict"]["payload"]["resolution_status"] == "resolved"
 
 
 def test_calendar_approval_route_audits_missing_google_token_without_marking_written(monkeypatch):

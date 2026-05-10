@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from .calendar_auth import resolve_google_calendar_credentials
 from .config import Settings
 from .models import Node
 from .scheduler import CalendarProvider, GoogleCalendarProvider, SINGAPORE_TZ
@@ -27,14 +28,17 @@ class CalendarWriteProvider(Protocol):
 @dataclass
 class GoogleCalendarWriteProvider:
     settings: Settings
+    store: GraphStore | None = None
+    patient_id: str | None = None
 
     async def insert_event(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not vendor_allowed(self.settings, "google_calendar", "calendar_write"):
             raise RuntimeError("Google Calendar is disabled for calendar_write.")
-        if not self.settings.google_calendar_access_token:
+        credentials = await resolve_google_calendar_credentials(self.settings, self.store, self.patient_id)
+        if not credentials:
             raise RuntimeError("Google Calendar write requires GOOGLE_CALENDAR_ACCESS_TOKEN.")
-        url = f"{self.settings.google_calendar_api_base_url.rstrip('/')}/calendars/{self.settings.google_calendar_id}/events"
-        headers = {"Authorization": f"Bearer {self.settings.google_calendar_access_token}", "Content-Type": "application/json"}
+        url = f"{self.settings.google_calendar_api_base_url.rstrip('/')}/calendars/{credentials.calendar_id}/events"
+        headers = {"Authorization": f"Bearer {credentials.access_token}", "Content-Type": "application/json"}
         async with httpx.AsyncClient(timeout=20) as client:
             response = await client.post(url, json=payload, headers=headers)
             response.raise_for_status()
@@ -153,7 +157,7 @@ async def _approve_appointment_calendar_write_locked(
 
     event_payload = _event_payload_from_appointment(appointment)
     conflict_payload = await _pending_appointment_conflict_payload(store, patient_id, appointment)
-    provider = calendar_provider if calendar_provider is not None else (GoogleCalendarProvider(settings) if calendar_writer is None else None)
+    provider = calendar_provider if calendar_provider is not None else (GoogleCalendarProvider(settings, store, patient_id) if calendar_writer is None else None)
     try:
         conflict_payload = conflict_payload or (await _appointment_write_conflict_payload(appointment, provider) if provider else None)
     except Exception as exc:
@@ -187,7 +191,7 @@ async def _approve_appointment_calendar_write_locked(
             "calendar_event": None,
         }
     try:
-        writer = calendar_writer or GoogleCalendarWriteProvider(settings)
+        writer = calendar_writer or GoogleCalendarWriteProvider(settings, store, patient_id)
         response = await writer.insert_event(event_payload)
     except Exception as exc:
         updated_request = await store.update_node_payload(

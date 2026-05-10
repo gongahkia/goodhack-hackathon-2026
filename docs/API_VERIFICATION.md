@@ -57,6 +57,8 @@ GOOGLE_CALENDAR_ID=primary
 
 Without a Google token, appointment approval still creates an audited `calendar_write_request` with `status: "write_failed"`.
 
+Google Calendar OAuth routes exist for production account linking, but are disabled unless `GOOGLE_CALENDAR_OAUTH_ENABLED=true`. Demo mode still uses `GOOGLE_CALENDAR_ACCESS_TOKEN` and `GOOGLE_CALENDAR_ID`.
+
 Optional SEA-LION transcript review:
 
 ```bash
@@ -153,6 +155,31 @@ Copy an appointment candidate id from the process response, then approve:
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/appointments/APPOINTMENT_ID/approve-calendar-write | jq
+```
+
+### Cron and Conflict Resolution
+
+External scheduler trigger:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/scheduler/cron/next-day-check \
+  -H "X-Cron-Key: $SCHEDULER_CRON_KEY" | jq
+```
+
+List active conflicts:
+
+```bash
+curl -s http://127.0.0.1:8000/schedule-conflicts \
+  -H "X-API-Key: $API_READ_KEY" | jq
+```
+
+Resolve with a safe custom time:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/schedule-conflicts/CONFLICT_ID/resolve \
+  -H "X-API-Key: $API_WRITE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"custom_time","scheduled_time":"11:00","reason":"Caregiver selected a clear slot."}' | jq
 ```
 
 Expected without a Google token:

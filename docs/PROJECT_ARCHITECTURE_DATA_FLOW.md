@@ -12,48 +12,7 @@ This document covers the current backend repository. No production frontend is p
 
 ## Architecture
 
-![Project architecture and data flow](./project-architecture-data-flow-diagram.svg)
-
-```mermaid
-flowchart LR
-  Client[Caregiver/API client] --> API[FastAPI app]
-  API --> Auth[API key auth, CORS, rate limits]
-  API --> Store[(GraphStore: memory or Postgres)]
-
-  API --> TP[transcript pipeline]
-  TP --> STT[transcription provider]
-  STT --> OAI[OpenAI gpt-4o-transcribe]
-  STT --> Groq[Groq optional]
-  STT --> Local[local MLX/faster-whisper optional]
-
-  TP --> Redact[PII redaction]
-  Redact --> Extract[entity extraction]
-  Extract --> Triage[triage decision]
-
-  Triage --> Daily[daily_task]
-  Triage --> Appt[appointment_candidate]
-  Triage --> Research[ad_hoc_research_task]
-
-  Daily --> Scheduler[next-day scheduler]
-  Scheduler --> GCalRead[Google Calendar events.list]
-  Scheduler --> Conflict[schedule_conflict]
-
-  Appt --> Approval[user decision]
-  Approval --> CalendarWrite[calendar_write_request]
-  CalendarWrite --> GCalWrite[Google Calendar events.insert]
-
-  Research --> Guard[guardrail review]
-  Guard --> Search[curated corpus and live search]
-  Search --> Result[research_result]
-  Result --> Synth[synthesized_recommendation]
-
-  Conflict --> Notify[notifications]
-  Daily --> Notify
-  CalendarWrite --> Notify
-  Synth --> Notify
-
-  Store --> Audit[reasoning logs, consent, processing activity, retention]
-```
+![Project architecture](./project-architecture-diagram.svg)
 
 ## Core Components
 
@@ -107,43 +66,7 @@ Key edge types:
 
 ## End-To-End Data Flow
 
-```mermaid
-flowchart TD
-  A[audio upload or live websocket] --> B[transcription_session]
-  B --> C[STT provider]
-  C --> D[normalized English transcript]
-  D --> E[PII redaction]
-  E --> F[extracted_entities]
-  F --> G[triage_decision]
-
-  G --> A1[appointment bucket]
-  A1 --> A2[appointment_candidate]
-  A2 --> A3[user approves calendar write]
-  A3 --> A4[user_decision]
-  A4 --> A5[calendar_write_request]
-  A5 --> A6[Google Calendar events.insert]
-  A6 --> A7[appointment written or write_failed]
-  A7 --> N[notifications and audit graph]
-
-  G --> D1[daily task bucket]
-  D1 --> D2[daily_task pending review]
-  D2 --> D3[user review or patch]
-  D3 --> D4[22:00 Asia/Singapore next-day check]
-  D4 --> D5[Google Calendar events.list]
-  D5 --> D6[conflict detection]
-  D6 --> D7[schedule_conflict and notification_candidate]
-  D7 --> N
-
-  G --> R1[ad hoc research bucket]
-  R1 --> R2[ad_hoc_research_task]
-  R2 --> R3[research_plan]
-  R3 --> R4[guardrail_review]
-  R4 --> R5[curated corpus plus live search]
-  R5 --> R6[page fetch and extraction]
-  R6 --> R7[research_result nodes]
-  R7 --> R8[synthesized_recommendation]
-  R8 --> N
-```
+![Project data flow](./project-data-flow-diagram.svg)
 
 ## Appointment Flow
 

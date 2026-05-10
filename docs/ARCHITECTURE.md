@@ -180,7 +180,7 @@ Status as of May 10, 2026:
 | Phase 4 extraction and triage | Done | `extraction.py` creates `extracted_entities`, `triage_decision`, `daily_task`, `appointment_candidate`, and `ad_hoc_research_task`; tests cover simple and multi-bucket transcripts. |
 | Daily task scheduling semantics | Done | `approvals.py` supports timing/fixed/movable overrides; `scheduler.py` classifies fixed/movable/unsafe conflicts and medication spacing. |
 | Google Calendar next-day read | Done | `scheduler.py` reads only the next-day window through `GoogleCalendarProvider`. |
-| Daily 10pm Singapore job | Partial | The scheduler logic and manual endpoint exist, but no production cron/background job is currently wired for 22:00 daily execution. |
+| Daily 10pm Singapore job | Mostly done | The scheduler has an in-process loop and external cron endpoint with idempotent run state; deployed production still needs platform-level cron configuration. |
 | Appointment approval before calendar write | Done | `approvals.py` creates `user_decision`, `calendar_write_request`, and writes only after `/appointments/{id}/approve-calendar-write`. |
 | Push notification first step | Done for polling | `notification_candidate` nodes and `GET /notifications` exist. Real push provider/SSE/WebSocket are intentionally not implemented. |
 | Phase 6 guarded research pipeline | Done | `research.py` plans, guardrails, runs curated/live adapters, classifies source tiers, and synthesizes recommendations. |
@@ -190,7 +190,7 @@ Status as of May 10, 2026:
 | Evaluation plan | Mostly done | Unit/API/E2E tests cover all core eval cases; live Google Calendar full flow remains manual with real tokens. |
 | Compliance/security hardening | Added beyond roadmap | Auth, response sanitization, encryption-at-rest option, consent/DSAR/incidents/retention, and vendor gates exist. |
 
-Summary: the roadmap phases are implemented for demo and backend MVP purposes. The main remaining production gaps are a real OAuth refresh-token flow for Google Calendar, an actual scheduled 22:00 job runner, and first-class conflict-resolution endpoint semantics.
+Summary: the roadmap phases are implemented for demo and backend MVP purposes. The main remaining production gaps are enabling real Google OAuth in deployment, platform cron configuration, and broader conflict semantics beyond daily tasks and appointments.
 
 ## Test Entry Points
 

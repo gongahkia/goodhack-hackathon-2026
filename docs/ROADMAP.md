@@ -708,10 +708,10 @@ Done:
 
 Remaining production gaps:
 
-- The 22:00 Asia/Singapore scheduler exists as a callable endpoint/job function, but no production cron/background scheduler is wired yet.
-- Google Calendar uses an operator-provided access token for the demo; a production OAuth refresh-token flow is not implemented.
+- The 22:00 Asia/Singapore scheduler has an in-process loop and external cron endpoint; hosted production still needs platform-level scheduling configuration.
+- Google Calendar demo mode still uses an operator-provided access token; production OAuth account-linking is scaffolded behind `GOOGLE_CALENDAR_OAUTH_ENABLED=false`.
 - Google Calendar read/write permissions are not split into separate account-link flows yet.
-- Conflict resolution is indirect through daily-task edits and scheduler reruns; there is no first-class `/schedule-conflicts/{id}/resolve` endpoint yet.
+- Conflict resolution has first-class list/resolve endpoints for daily-task conflicts; broader ad-hoc-event conflict semantics are not implemented yet.
 - Legacy NEHR/demo code has been physically deleted from the active backend and tests.
 
 ## Change Log

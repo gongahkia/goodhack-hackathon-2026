@@ -1,0 +1,167 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1900" height="1100" viewBox="0 0 1900 1100">
+  <defs>
+    <style>
+      @font-face { font-family: "VirgilLocal"; src: url("./assets/Virgil.woff2") format("woff2"); }
+      .txt { font-family: "VirgilLocal", "Virgil", "Excalifont", "Comic Sans MS", "Bradley Hand", cursive; fill:#171717; text-anchor:middle; dominant-baseline:middle; }
+      .title { font-size:32px; font-weight:700; }
+      .section { font-size:22px; font-weight:700; }
+      .node { font-size:17px; font-weight:700; }
+      .small { font-size:13px; }
+      .tiny { font-size:11px; }
+      .box { stroke-width:3; rx:22; ry:22; }
+      .thin { stroke-width:2.4; rx:16; ry:16; }
+      .dash { stroke-dasharray:11 11; stroke-linecap:round; fill:none; }
+      .arrow { fill:none; stroke:#e87510; stroke-width:3; stroke-linecap:round; stroke-linejoin:round; marker-end:url(#arrow); }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#e87510"/>
+    </marker>
+  </defs>
+
+  <rect width="1900" height="1100" fill="#fffdf7"/>
+  <text x="950" y="40" class="txt title">GoodHack Caregiver Companion - Data Flow</text>
+
+  <rect x="35" y="85" width="405" height="950" class="dash" stroke="#16a34a" stroke-width="3"/>
+  <text x="238" y="128" class="txt section">Common Ingestion</text>
+
+  <rect x="100" y="175" width="275" height="70" class="box" fill="#ecfeff" stroke="#06b6d4"/>
+  <text x="238" y="201" class="txt node">Audio Or Transcript</text>
+  <text x="238" y="225" class="txt small">Upload Or Live WebSocket</text>
+
+  <rect x="100" y="295" width="275" height="70" class="box" fill="#d9f99d" stroke="#65a30d"/>
+  <text x="238" y="321" class="txt node">Transcription Session</text>
+  <text x="238" y="345" class="txt small">Session Node Created</text>
+
+  <rect x="100" y="415" width="275" height="70" class="box" fill="#bae6fd" stroke="#0284c7"/>
+  <text x="238" y="441" class="txt node">STT Provider</text>
+  <text x="238" y="465" class="txt small">OpenAI | Groq | Local</text>
+
+  <rect x="100" y="535" width="275" height="70" class="box" fill="#fef3c7" stroke="#d97706"/>
+  <text x="238" y="561" class="txt node">Transcript Node</text>
+  <text x="238" y="585" class="txt small">Normalized English Text</text>
+
+  <rect x="100" y="655" width="275" height="70" class="box" fill="#bbf7d0" stroke="#16a34a"/>
+  <text x="238" y="681" class="txt node">PII Redaction</text>
+  <text x="238" y="705" class="txt small">Placeholder Map Stored</text>
+
+  <rect x="100" y="775" width="275" height="70" class="box" fill="#e9d5ff" stroke="#9333ea"/>
+  <text x="238" y="801" class="txt node">Extracted Entities</text>
+  <text x="238" y="825" class="txt small">Medication | Time | Research Intent</text>
+
+  <rect x="100" y="895" width="275" height="70" class="box" fill="#fff7ed" stroke="#f97316"/>
+  <text x="238" y="921" class="txt node">Triage Decision</text>
+  <text x="238" y="945" class="txt small">Routes To Three Buckets</text>
+
+  <path d="M238 245 L238 295" class="arrow"/>
+  <path d="M238 365 L238 415" class="arrow"/>
+  <path d="M238 485 L238 535" class="arrow"/>
+  <path d="M238 605 L238 655" class="arrow"/>
+  <path d="M238 725 L238 775" class="arrow"/>
+  <path d="M238 845 L238 895" class="arrow"/>
+
+  <rect x="500" y="85" width="1350" height="950" class="dash" stroke="#9333ea" stroke-width="3"/>
+  <text x="1175" y="128" class="txt section">Bucket Outputs</text>
+
+  <rect x="535" y="170" width="1280" height="230" class="dash" stroke="#db2777" stroke-width="3"/>
+  <text x="650" y="210" class="txt section">Appointment Time</text>
+
+  <rect x="575" y="250" width="170" height="78" class="box" fill="#fce7f3" stroke="#db2777"/>
+  <text x="660" y="278" class="txt small">Appointment</text>
+  <text x="660" y="302" class="txt small">Candidate</text>
+
+  <rect x="800" y="250" width="170" height="78" class="box" fill="#fce7f3" stroke="#db2777"/>
+  <text x="885" y="278" class="txt small">User Approval</text>
+  <text x="885" y="302" class="txt tiny">Required</text>
+
+  <rect x="1025" y="250" width="190" height="78" class="box" fill="#fce7f3" stroke="#db2777"/>
+  <text x="1120" y="278" class="txt small">Calendar Write</text>
+  <text x="1120" y="302" class="txt small">Request</text>
+
+  <rect x="1270" y="250" width="190" height="78" class="box" fill="#e0f2fe" stroke="#0284c7"/>
+  <text x="1365" y="278" class="txt small">Google Calendar</text>
+  <text x="1365" y="302" class="txt small">Events Insert</text>
+
+  <rect x="1515" y="250" width="170" height="78" class="box" fill="#fff7ed" stroke="#f97316"/>
+  <text x="1600" y="278" class="txt small">Written Or</text>
+  <text x="1600" y="302" class="txt small">Write Failed</text>
+
+  <rect x="1695" y="250" width="90" height="78" class="thin" fill="#fff7ed" stroke="#f97316"/>
+  <text x="1740" y="289" class="txt tiny">Notify</text>
+
+  <path d="M375 930 C460 930, 470 289, 575 289" class="arrow"/>
+  <path d="M745 289 L800 289" class="arrow"/>
+  <path d="M970 289 L1025 289" class="arrow"/>
+  <path d="M1215 289 L1270 289" class="arrow"/>
+  <path d="M1460 289 L1515 289" class="arrow"/>
+  <path d="M1685 289 L1695 289" class="arrow"/>
+
+  <rect x="535" y="440" width="1280" height="230" class="dash" stroke="#16a34a" stroke-width="3"/>
+  <text x="630" y="480" class="txt section">Daily Task</text>
+
+  <rect x="575" y="520" width="170" height="78" class="box" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="660" y="548" class="txt small">Daily Task</text>
+  <text x="660" y="572" class="txt tiny">Pending Review</text>
+
+  <rect x="800" y="520" width="170" height="78" class="box" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="885" y="548" class="txt small">User Review</text>
+  <text x="885" y="572" class="txt tiny">Or Patch</text>
+
+  <rect x="1025" y="520" width="190" height="78" class="box" fill="#fef9c3" stroke="#ca8a04"/>
+  <text x="1120" y="548" class="txt small">22:00 SG</text>
+  <text x="1120" y="572" class="txt small">Scheduler</text>
+
+  <rect x="1270" y="520" width="190" height="78" class="box" fill="#e0f2fe" stroke="#0284c7"/>
+  <text x="1365" y="548" class="txt small">Google Calendar</text>
+  <text x="1365" y="572" class="txt small">Events List</text>
+
+  <rect x="1515" y="520" width="170" height="78" class="box" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="1600" y="548" class="txt small">Conflict</text>
+  <text x="1600" y="572" class="txt small">Detection</text>
+
+  <rect x="1695" y="520" width="90" height="78" class="thin" fill="#fff7ed" stroke="#f97316"/>
+  <text x="1740" y="559" class="txt tiny">Notify</text>
+
+  <path d="M375 930 C470 930, 470 559, 575 559" class="arrow"/>
+  <path d="M745 559 L800 559" class="arrow"/>
+  <path d="M970 559 L1025 559" class="arrow"/>
+  <path d="M1215 559 L1270 559" class="arrow"/>
+  <path d="M1460 559 L1515 559" class="arrow"/>
+  <path d="M1685 559 L1695 559" class="arrow"/>
+
+  <rect x="535" y="710" width="1280" height="255" class="dash" stroke="#7c3aed" stroke-width="3"/>
+  <text x="665" y="750" class="txt section">Ad Hoc Research</text>
+
+  <rect x="575" y="800" width="150" height="78" class="box" fill="#ede9fe" stroke="#7c3aed"/>
+  <text x="650" y="828" class="txt small">Research</text>
+  <text x="650" y="852" class="txt small">Task</text>
+
+  <rect x="775" y="800" width="150" height="78" class="box" fill="#ede9fe" stroke="#7c3aed"/>
+  <text x="850" y="828" class="txt small">Research</text>
+  <text x="850" y="852" class="txt small">Plan</text>
+
+  <rect x="975" y="800" width="150" height="78" class="box" fill="#ede9fe" stroke="#7c3aed"/>
+  <text x="1050" y="839" class="txt small">Guardrail</text>
+
+  <rect x="1175" y="800" width="170" height="78" class="box" fill="#fae8ff" stroke="#a21caf"/>
+  <text x="1260" y="828" class="txt small">Search + Fetch</text>
+  <text x="1260" y="852" class="txt tiny">Curated + Live</text>
+
+  <rect x="1395" y="800" width="150" height="78" class="box" fill="#ede9fe" stroke="#7c3aed"/>
+  <text x="1470" y="828" class="txt small">Research</text>
+  <text x="1470" y="852" class="txt small">Results</text>
+
+  <rect x="1595" y="800" width="170" height="78" class="box" fill="#ede9fe" stroke="#7c3aed"/>
+  <text x="1680" y="828" class="txt small">Synthesized</text>
+  <text x="1680" y="852" class="txt small">Recommendation</text>
+
+  <path d="M375 930 C475 930, 480 839, 575 839" class="arrow"/>
+  <path d="M725 839 L775 839" class="arrow"/>
+  <path d="M925 839 L975 839" class="arrow"/>
+  <path d="M1125 839 L1175 839" class="arrow"/>
+  <path d="M1345 839 L1395 839" class="arrow"/>
+  <path d="M1545 839 L1595 839" class="arrow"/>
+
+  <rect x="1510" y="930" width="255" height="42" class="thin" fill="#fff7ed" stroke="#f97316"/>
+  <text x="1638" y="951" class="txt tiny">Recommendations + Notifications</text>
+  <path d="M1680 878 L1680 930" class="arrow"/>
+</svg>

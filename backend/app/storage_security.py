@@ -14,6 +14,9 @@ SENSITIVE_PAYLOAD_FIELDS = {
     "error",
     "raw_response",
     "content",
+    "access_token",
+    "refresh_token",
+    "id_token",
 }
 ENCRYPTION_MARKER = "__encrypted__"
 

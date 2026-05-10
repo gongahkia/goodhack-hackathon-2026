@@ -54,7 +54,9 @@
 - First-class language hints: `auto`, `en`, `ms`, `ta`, `zh`, `th`; locale/name aliases such as `en-SG`, `bahasa melayu`, `தமிழ்`, `zh-Hans`, `普通话`, and `ภาษาไทย` normalize to those codes.
 - Non-English transcripts preserve original text and add English-normalized text.
 - Optional external keys: `TINYFISH_API_KEY`, `EXA_API_KEY`, `SEALION_API_KEY`, `JINA_API_KEY`, `OPENALEX_API_KEY`, `SEMANTIC_SCHOLAR_API_KEY`.
-- Optional Google Calendar: `GOOGLE_CALENDAR_ACCESS_TOKEN`, `GOOGLE_CALENDAR_ID=primary`.
+- Optional Google Calendar demo mode: `GOOGLE_CALENDAR_ACCESS_TOKEN`, `GOOGLE_CALENDAR_ID=primary`.
+- Optional Google Calendar OAuth scaffold: `GOOGLE_CALENDAR_OAUTH_ENABLED=false`, `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`.
+- Optional scheduler cron auth: `SCHEDULER_CRON_KEY`.
 - Optional auth: `API_READ_KEY`, `API_WRITE_KEY`, `CLINICIAN_REVIEW_KEY`.
 - Optional encryption: `DATA_ENCRYPTION_KEY`.
 - Pilot/prod requires `API_READ_KEY`, `API_WRITE_KEY`, and `DATA_ENCRYPTION_KEY`.
@@ -89,10 +91,17 @@
 - `GET /tasks/daily`
 - `PATCH /tasks/daily/{task_id}`
 - `POST /scheduler/next-day-check`
+- `POST /scheduler/cron/next-day-check`
+- `GET /schedule-conflicts`
+- `POST /schedule-conflicts/{conflict_id}/resolve`
 - `GET /research/tasks`
 - `POST /research/tasks/{task_id}/run`
 - `GET /recommendations`
 - `POST /appointments/{appointment_id}/approve-calendar-write`
+- `GET /calendar/google/connect`
+- `GET /calendar/google/callback`
+- `GET /calendar/google/status`
+- `DELETE /calendar/google/disconnect`
 - `GET /notifications`
 - `GET /audit`
 - `POST /privacy/consents`

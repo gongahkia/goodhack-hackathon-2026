@@ -10,7 +10,7 @@ from app.notifications import build_notifications
 import asyncio
 
 import app.scheduler as scheduler_module
-from app.scheduler import CalendarEvent, GoogleCalendarProvider, SINGAPORE_TZ, daily_scheduler_loop, run_next_day_schedule_check
+from app.scheduler import CalendarEvent, GoogleCalendarProvider, SINGAPORE_TZ, daily_scheduler_loop, run_next_day_schedule_check, run_next_day_schedule_check_once
 from app.store import MemoryGraphStore
 
 
@@ -184,6 +184,42 @@ async def test_google_calendar_provider_uses_next_day_event_list_parameters(monk
 
 
 @pytest.mark.asyncio
+async def test_google_calendar_provider_prefers_linked_oauth_account_when_enabled(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def fake_get(self, url, params=None, headers=None):
+        captured["url"] = url
+        captured["headers"] = headers
+        return httpx.Response(200, json={"items": []}, request=httpx.Request("GET", url))
+
+    store = MemoryGraphStore()
+    await store.create_node(
+        "calendar_account",
+        {
+            "patient_id": "patient-1",
+            "provider": "google_calendar",
+            "connection_status": "linked",
+            "calendar_id": "oauth-calendar",
+            "access_token": "oauth-token",
+            "access_token_expires_at": (datetime.now(tz=SINGAPORE_TZ) + timedelta(hours=1)).isoformat(),
+        },
+        "user",
+        status="approved",
+    )
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    provider = GoogleCalendarProvider(
+        Settings(google_calendar_oauth_enabled=True, google_calendar_access_token="demo-token", google_calendar_id="primary"),
+        store,
+        "patient-1",
+    )
+
+    await provider.list_events(datetime(2026, 5, 10, tzinfo=SINGAPORE_TZ), datetime(2026, 5, 11, tzinfo=SINGAPORE_TZ))
+
+    assert str(captured["url"]).endswith("/calendars/oauth-calendar/events")
+    assert captured["headers"] == {"Authorization": "Bearer oauth-token"}
+
+
+@pytest.mark.asyncio
 async def test_persisted_notification_candidates_are_returned_by_notification_builder():
     store = MemoryGraphStore()
     await _daily_task(store, {"title": "Give Panadol before lunch", "timing_relation": "before lunch"})
@@ -202,6 +238,21 @@ async def test_persisted_notification_candidates_are_returned_by_notification_bu
     notifications = build_notifications(graph, await store.list_reasoning_logs())
 
     assert any(item["id"].startswith("notification:") and item["kind"] == "next-day conflict warning" for item in notifications)
+
+
+@pytest.mark.asyncio
+async def test_next_day_check_once_is_idempotent_for_same_target_date():
+    store = MemoryGraphStore()
+    await _daily_task(store, {"title": "Give Panadol before lunch", "timing_relation": "before lunch"})
+    provider = FakeCalendarProvider([])
+    now = datetime(2026, 5, 9, 22, 0, tzinfo=SINGAPORE_TZ)
+
+    first = await run_next_day_schedule_check_once(store, "patient-1", Settings(), calendar_provider=provider, now=now)
+    second = await run_next_day_schedule_check_once(store, "patient-1", Settings(), calendar_provider=provider, now=now)
+
+    assert first["already_ran"] is False
+    assert second["already_ran"] is True
+    assert len(provider.calls) == 1
 
 
 @pytest.mark.asyncio

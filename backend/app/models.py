@@ -44,6 +44,7 @@ NodeType = Literal[
     "privacy_incident",
     "retention_tombstone",
     "patient_identity",
+    "calendar_account",
 ]
 
 EdgeType = Literal[
@@ -127,6 +128,12 @@ class IdentityAliasCreate(BaseModel):
     source: str = Field(default="user", min_length=1, max_length=80)
     confidence: float = Field(default=0.95, ge=0, le=1)
     status: NodeStatus = "approved"
+
+
+class ScheduleConflictResolutionCreate(BaseModel):
+    action: Literal["accept_suggested_time", "custom_time", "keep_fixed", "dismiss", "recompute"]
+    scheduled_time: str | None = None
+    reason: str | None = Field(default=None, max_length=1000)
 
 
 class StatusUpdate(BaseModel):

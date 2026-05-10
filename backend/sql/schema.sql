@@ -44,7 +44,8 @@ create table if not exists nodes (
     'data_subject_request',
     'privacy_incident',
     'retention_tombstone',
-    'patient_identity'
+    'patient_identity',
+    'calendar_account'
   )),
   payload jsonb not null,
   created_by text not null check (created_by in ('agent', 'system', 'user')),
@@ -128,7 +129,8 @@ alter table nodes add constraint nodes_type_check check (type in (
   'data_subject_request',
   'privacy_incident',
   'retention_tombstone',
-  'patient_identity'
+  'patient_identity',
+  'calendar_account'
 ));
 
 alter table nodes drop constraint if exists nodes_status_check;
