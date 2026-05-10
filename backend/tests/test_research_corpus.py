@@ -6,7 +6,7 @@ import pytest
 import app.research as research
 from app.config import Settings
 from app.data import grants_database, singapore_support_corpus
-from app.research import DefaultResearchToolAdapter, ResearchQuestion, run_guarded_research_pipeline
+from app.research import DefaultResearchToolAdapter, GuardrailReview, ResearchExtraction, ResearchQuestion, run_guarded_research_pipeline, synthesize_recommendation
 from app.store import MemoryGraphStore
 
 
@@ -115,6 +115,107 @@ async def test_research_adapter_keeps_local_corpus_and_live_web_results(monkeypa
     assert "tinyfish_search" in providers
     assert any(result.url == "https://www.aic.sg/financial-assistance/seniors-mobility-enabling-fund-smf/" and result.provider == "curated_corpus" for result in results)
     assert any(result.url == "https://www.aic.sg/financial-assistance/seniors-mobility-enabling-fund-smf/" and result.provider == "exa" for result in results)
+
+
+@pytest.mark.asyncio
+async def test_research_adapter_fetches_pages_and_synthesis_uses_extracted_details(monkeypatch):
+    async def fake_search_verified_grants(query, settings, allowlist=None):
+        return []
+
+    async def fake_search_verified_resources(query, settings, allowlist=None):
+        return []
+
+    async def fake_exa_search_web(query, settings, allowlist=None, num_results=5, search_type="auto"):
+        return {"provider": "exa", "configured": True, "results": []}
+
+    async def fake_tinyfish_search_web(query, settings, allowlist=None):
+        return {
+            "provider": "tinyfish_search",
+            "configured": True,
+            "results": [
+                {
+                    "title": "Live AIC mobility search result",
+                    "url": "https://www.aic.sg/financial-assistance/seniors-mobility-enabling-fund-smf/",
+                    "snippet": "Search snippet only says this page is about mobility support.",
+                    "verification_status": "safe_to_show",
+                    "provider": "tinyfish_search",
+                }
+            ],
+        }
+
+    async def fake_tinyfish_fetch_urls(urls, settings, allowlist=None, format="markdown"):
+        return {
+            "provider": "tinyfish_fetch",
+            "configured": True,
+            "results": [
+                {
+                    "url": url,
+                    "final_url": url,
+                    "title": "Fetched mobility support page",
+                    "text": (
+                        "Applicants must be Singapore Citizens or Permanent Residents. "
+                        "The scheme may subsidise approved mobility devices up to a capped amount. "
+                        "Prepare the application form, NRIC, and therapist assessment. "
+                        "Apply through an AIC-appointed assessor or ask the hospital medical social worker."
+                    ),
+                }
+                for url in urls
+            ],
+            "errors": [],
+            "rejected_urls": [],
+        }
+
+    async def fake_extract_pages(question, pages, settings):
+        assert any("Applicants must be Singapore Citizens or Permanent Residents" in page["text"] for page in pages)
+        return {
+            research._url_key(page["url"]): ResearchExtraction(
+                summary="The page explains mobility support eligibility and application requirements.",
+                verified_facts=["The support page describes an official mobility aid scheme."],
+                eligibility_criteria=["Applicants must be Singapore Citizens or Permanent Residents."],
+                support_amounts=["The page says subsidies may be capped for approved mobility devices."],
+                required_documents=["Prepare the application form, NRIC, and therapist assessment."],
+                application_steps=["Apply through an AIC-appointed assessor or ask the hospital medical social worker."],
+                extraction_provider="openai",
+                extraction_model=settings.openai_model,
+            )
+            for page in pages
+        }
+
+    monkeypatch.setattr(research, "search_verified_grants", fake_search_verified_grants)
+    monkeypatch.setattr(research, "search_verified_resources", fake_search_verified_resources)
+    monkeypatch.setattr(research, "exa_search_web", fake_exa_search_web)
+    monkeypatch.setattr(research, "tinyfish_search_web", fake_tinyfish_search_web)
+    monkeypatch.setattr(research, "tinyfish_fetch_urls", fake_tinyfish_fetch_urls)
+    monkeypatch.setattr(research, "_extract_research_pages_with_openai", fake_extract_pages)
+
+    adapter = DefaultResearchToolAdapter()
+    question = ResearchQuestion(
+        query="wheelchair mobility grant Singapore official subsidy eligibility",
+        source_policy="official",
+        rationale="Verify official support schemes.",
+        tools=["curated_corpus", "tinyfish"],
+    )
+
+    results = await adapter.search(question, Settings(openai_api_key="fake-openai", tinyfish_api_key="fake-tinyfish"))
+
+    assert any(result.extraction_status == "llm_extracted" for result in results)
+    assert any(result.extraction and result.extraction.application_steps for result in results)
+
+    store = MemoryGraphStore()
+    task = await store.create_node(
+        "ad_hoc_research_task",
+        {
+            "patient_id": "patient-1",
+            "question": "What wheelchair grants are available in Singapore?",
+            "question_redacted": "What wheelchair grants are available in Singapore?",
+        },
+        "agent",
+    )
+    recommendation = synthesize_recommendation(task, GuardrailReview(decision="approved", reason="ok"), results)
+
+    assert any("Singapore Citizens or Permanent Residents" in item for item in recommendation.eligibility_criteria)
+    assert any("AIC-appointed assessor" in item for item in recommendation.application_steps)
+    assert "Fetched source pages" in recommendation.summary
 
 
 @pytest.mark.asyncio

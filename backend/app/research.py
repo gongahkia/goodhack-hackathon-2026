@@ -1,18 +1,23 @@
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 from urllib.parse import urlparse
 
+from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
 from .config import Settings
 from .data import singapore_support_corpus
 from .models import Node
+from .privacy import PiiRedactor
 from .sealion_reviews import maybe_secondary_research_guardrail_with_sealion
+from .security import vendor_allowed
 from .store import GraphStore
-from .v2 import exa_search_web, search_verified_grants, search_verified_resources, tinyfish_search_web
+from .v2 import exa_search_web, search_verified_grants, search_verified_resources, tinyfish_fetch_urls, tinyfish_search_web
 
 
 SourceTier = Literal["official", "high_trust", "informal"]
@@ -23,6 +28,8 @@ GuardrailDecision = Literal["approved", "narrowed", "blocked"]
 OFFICIAL_DOMAINS = ["gov.sg", "moh.gov.sg", "aic.sg", "healthhub.sg", "cpf.gov.sg", "msf.gov.sg", "sgenable.sg"]
 HIGH_TRUST_DOMAINS = ["ttsh.com.sg", "nuhs.edu.sg", "singhealth.com.sg", "sgh.com.sg", "snec.com.sg", "straitstimes.com"]
 INFORMAL_DOMAINS = ["reddit.com", "forums.hardwarezone.com.sg", "blogspot.com", "wordpress.com"]
+RESEARCH_FETCH_MAX_URLS = 6
+RESEARCH_PAGE_MAX_CHARS = 12000
 
 
 class ResearchQuestion(BaseModel):
@@ -48,6 +55,22 @@ class GuardrailReview(BaseModel):
     reason: str
 
 
+class ResearchExtraction(BaseModel):
+    summary: str = ""
+    verified_facts: list[str] = Field(default_factory=list)
+    eligibility_criteria: list[str] = Field(default_factory=list)
+    support_amounts: list[str] = Field(default_factory=list)
+    required_documents: list[str] = Field(default_factory=list)
+    application_steps: list[str] = Field(default_factory=list)
+    contact_or_links: list[str] = Field(default_factory=list)
+    community_tips: list[str] = Field(default_factory=list)
+    needs_verification: list[str] = Field(default_factory=list)
+    caveats: list[str] = Field(default_factory=list)
+    extraction_provider: str = "none"
+    extraction_model: str | None = None
+    extracted_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+
+
 class ResearchSource(BaseModel):
     title: str
     url: str | None = None
@@ -57,12 +80,22 @@ class ResearchSource(BaseModel):
     verification_status: str = "needs_review"
     retrieved_at: str
     provider: str
+    content_provider: str | None = None
+    content_retrieved_at: str | None = None
+    content_length: int | None = None
+    extraction_status: str = "snippet_only"
+    extraction_error: str | None = None
+    extraction: ResearchExtraction | None = None
 
 
 class RecommendationCard(BaseModel):
     title: str
     summary: str
     verified_facts: list[str] = Field(default_factory=list)
+    eligibility_criteria: list[str] = Field(default_factory=list)
+    support_amounts: list[str] = Field(default_factory=list)
+    required_documents: list[str] = Field(default_factory=list)
+    application_steps: list[str] = Field(default_factory=list)
     community_tips: list[str] = Field(default_factory=list)
     needs_verification: list[str] = Field(default_factory=list)
     rejected_or_unsafe: list[str] = Field(default_factory=list)
@@ -84,7 +117,7 @@ class DefaultResearchToolAdapter:
             for item in await search_verified_resources(question.query, settings, domains):
                 results.append(_source_from_result(item, "curated_or_live_resources", "official"))
         results.extend(await _search_live_web(question, settings, domains))
-        return _dedupe_sources(results)
+        return await _enrich_sources_with_page_research(question, _dedupe_sources(results), settings, domains)
 
 
 async def run_guarded_research_pipeline(
@@ -264,13 +297,27 @@ def synthesize_recommendation(task: Node, guardrail: GuardrailReview, sources: l
     title = "Research result ready"
     if "wheelchair" in str(task.payload.get("question") or "").lower():
         title = "Wheelchair and mobility support research"
-    summary = "Review verified sources first. Informal sources are included only as practical leads, not eligibility or medical advice."
+    extracted_count = sum(1 for source in sources if source.extraction_status in {"llm_extracted", "local_extracted"} and source.extraction)
+    summary = (
+        "Fetched source pages were reviewed for eligibility criteria, amounts, documents, and application steps. "
+        "Informal sources are included only as practical leads, not eligibility or medical advice."
+        if extracted_count
+        else "Review verified sources first. Informal sources are included only as practical leads, not eligibility or medical advice."
+    )
     return RecommendationCard(
         title=title,
         summary=summary,
-        verified_facts=[_claim_from_source(source) for source in verified[:5]],
-        community_tips=[_claim_from_source(source) for source in informal[:5]],
-        needs_verification=[_claim_from_source(source) for source in needs[:5]],
+        verified_facts=_extracted_items(verified, "verified_facts", 6) or [_claim_from_source(source) for source in verified[:5]],
+        eligibility_criteria=_extracted_items(verified, "eligibility_criteria", 6),
+        support_amounts=_extracted_items(verified, "support_amounts", 5),
+        required_documents=_extracted_items(verified, "required_documents", 6),
+        application_steps=_extracted_items(verified, "application_steps", 6),
+        community_tips=_extracted_items(informal, "community_tips", 5) or [_claim_from_source(source) for source in informal[:5]],
+        needs_verification=[
+            *_extracted_items(sources, "needs_verification", 5),
+            *_extracted_items(sources, "caveats", 5),
+            *[_claim_from_source(source) for source in needs[:5]],
+        ][:8],
         rejected_or_unsafe=[],
         evidence=sources[:10],
     )
@@ -361,6 +408,280 @@ async def _search_live_web(question: ResearchQuestion, settings: Settings, domai
     for item in tiny.get("results", []):
         sources.append(_source_from_result(item, str(item.get("provider") or tiny.get("provider") or "tinyfish_search"), question.source_policy))
     return sources
+
+
+async def _enrich_sources_with_page_research(
+    question: ResearchQuestion,
+    sources: list[ResearchSource],
+    settings: Settings,
+    domains: list[str],
+) -> list[ResearchSource]:
+    candidates = [
+        source
+        for source in sources
+        if source.url and source.verification_status != "reject" and source.claim_status != "rejected_or_unsafe"
+    ][:RESEARCH_FETCH_MAX_URLS]
+    if not candidates:
+        return sources
+
+    urls = list(dict.fromkeys(str(source.url) for source in candidates if source.url))
+    fetched = await tinyfish_fetch_urls(urls, settings, domains, format="markdown")
+    if not isinstance(fetched, dict):
+        return sources
+    fetched_results = fetched.get("results")
+    if not isinstance(fetched_results, list) or not fetched_results:
+        status = "fetch_unavailable" if fetched.get("configured") is False else "fetch_failed"
+        return [
+            source.model_copy(update={"extraction_status": status, "extraction_error": str(fetched.get("error") or "")[:300] or None})
+            if source in candidates
+            else source
+            for source in sources
+        ]
+
+    pages_by_url = _fetched_pages_by_url(fetched_results)
+    pages: list[dict[str, Any]] = []
+    for source in candidates:
+        fetched_page = _fetched_page_for_source(source, pages_by_url)
+        text = _clean_page_text(fetched_page.get("text") if fetched_page else None)
+        if not fetched_page or not text:
+            continue
+        pages.append(
+            {
+                "url": source.url,
+                "title": source.title,
+                "source_tier": source.source_tier,
+                "claim_status": source.claim_status,
+                "text": text,
+                "content_length": len(text),
+                "content_retrieved_at": datetime.now(UTC).isoformat(),
+                "content_provider": str(fetched.get("provider") or "tinyfish_fetch"),
+            }
+        )
+
+    if not pages:
+        return sources
+
+    llm_extractions = await _extract_research_pages_with_openai(question, pages, settings)
+    enriched: list[ResearchSource] = []
+    for source in sources:
+        page = next((item for item in pages if _url_key(str(item.get("url") or "")) == _url_key(source.url or "")), None)
+        if not page:
+            enriched.append(source)
+            continue
+        extraction = llm_extractions.get(_url_key(source.url or ""))
+        status = "llm_extracted"
+        error = None
+        if not extraction:
+            extraction = _extract_research_page_locally(source, str(page.get("text") or ""))
+            status = "local_extracted"
+            error = "OpenAI research extraction was unavailable or returned no usable extraction."
+        enriched.append(
+            source.model_copy(
+                update={
+                    "content_provider": page["content_provider"],
+                    "content_retrieved_at": page["content_retrieved_at"],
+                    "content_length": page["content_length"],
+                    "extraction_status": status,
+                    "extraction_error": error,
+                    "extraction": extraction,
+                }
+            )
+        )
+    return enriched
+
+
+async def _extract_research_pages_with_openai(
+    question: ResearchQuestion,
+    pages: list[dict[str, Any]],
+    settings: Settings,
+) -> dict[str, ResearchExtraction]:
+    if not pages or settings.use_scripted_agent:
+        return {}
+    if not vendor_allowed(settings, "openai", "research_extraction"):
+        return {}
+
+    redactor = PiiRedactor()
+    payload = redactor.redact(
+        {
+            "research_question": question.model_dump(mode="json"),
+            "sources": [
+                {
+                    "url": page["url"],
+                    "title": page["title"],
+                    "source_tier": page["source_tier"],
+                    "claim_status": page["claim_status"],
+                    "page_text": str(page["text"])[:RESEARCH_PAGE_MAX_CHARS],
+                }
+                for page in pages
+            ],
+        }
+    )
+    try:
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
+        response = await client.responses.create(
+            model=settings.openai_model,
+            instructions=(
+                "Extract structured caregiver support research from fetched page content. "
+                "Use only the provided page_text, not search snippets or prior knowledge. "
+                "Return compact JSON only with key sources. Each source must include url, summary, "
+                "verified_facts, eligibility_criteria, support_amounts, required_documents, application_steps, "
+                "contact_or_links, community_tips, needs_verification, and caveats. "
+                "Paraphrase; do not give medical advice; leave a list empty when the page does not state it."
+            ),
+            input=json.dumps(payload, ensure_ascii=False, default=str),
+            max_output_tokens=1400,
+        )
+        raw = getattr(response, "output_text", "") or "{}"
+        parsed = _parse_json_object(raw)
+    except Exception:
+        return {}
+
+    extracted: dict[str, ResearchExtraction] = {}
+    for item in parsed.get("sources", []) if isinstance(parsed.get("sources"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "")
+        key = _url_key(url)
+        if not key:
+            continue
+        extraction = ResearchExtraction(
+            summary=_trim_text(item.get("summary"), 500),
+            verified_facts=_clean_items(item.get("verified_facts"), 6),
+            eligibility_criteria=_clean_items(item.get("eligibility_criteria"), 6),
+            support_amounts=_clean_items(item.get("support_amounts"), 5),
+            required_documents=_clean_items(item.get("required_documents"), 6),
+            application_steps=_clean_items(item.get("application_steps"), 6),
+            contact_or_links=_clean_items(item.get("contact_or_links"), 5),
+            community_tips=_clean_items(item.get("community_tips"), 4),
+            needs_verification=_clean_items(item.get("needs_verification"), 5),
+            caveats=_clean_items(item.get("caveats"), 5),
+            extraction_provider="openai",
+            extraction_model=settings.openai_model,
+        )
+        if _extraction_has_content(extraction):
+            extracted[key] = extraction
+    return extracted
+
+
+def _extract_research_page_locally(source: ResearchSource, page_text: str) -> ResearchExtraction:
+    lines = _candidate_lines(page_text)
+    summary = next((line for line in lines if len(line) >= 40), source.snippet or source.title)
+    return ResearchExtraction(
+        summary=_trim_text(summary, 500),
+        verified_facts=_keyword_items(lines, ("scheme", "fund", "grant", "subsidy", "support", "assistance"), 5),
+        eligibility_criteria=_keyword_items(lines, ("eligible", "eligibility", "criteria", "qualify", "singapore citizen", "permanent resident", "means-test"), 6),
+        support_amounts=_keyword_items(lines, ("$", "amount", "cap", "subsid", "up to", "%", "per month", "per year", "co-payment"), 5),
+        required_documents=_keyword_items(lines, ("document", "form", "nric", "quotation", "invoice", "assessment", "prescription", "referral"), 6),
+        application_steps=_keyword_items(lines, ("apply", "submit", "contact", "approach", "call", "email", "singpass", "medical social worker"), 6),
+        needs_verification=_keyword_items(lines, ("check", "latest", "updated", "subject to", "terms", "conditions"), 4),
+        extraction_provider="local_fallback",
+        extraction_model=None,
+    )
+
+
+def _fetched_pages_by_url(results: list[Any]) -> dict[str, dict[str, Any]]:
+    pages: dict[str, dict[str, Any]] = {}
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        for key in (_url_key(str(item.get("url") or "")), _url_key(str(item.get("final_url") or ""))):
+            if key:
+                pages.setdefault(key, item)
+    return pages
+
+
+def _fetched_page_for_source(source: ResearchSource, pages_by_url: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+    key = _url_key(source.url or "")
+    if key in pages_by_url:
+        return pages_by_url[key]
+    source_path = urlparse(source.url or "").path.rstrip("/")
+    for page_key, page in pages_by_url.items():
+        page_path = urlparse(page_key).path.rstrip("/")
+        if source_path and page_path and (source_path.endswith(page_path) or page_path.endswith(source_path)):
+            return page
+    return None
+
+
+def _url_key(value: str) -> str:
+    parsed = urlparse(value)
+    domain = (parsed.hostname or "").lower().removeprefix("www.")
+    path = parsed.path.rstrip("/")
+    if not domain:
+        return value.lower().rstrip("/")
+    query = f"?{parsed.query}" if parsed.query else ""
+    return f"https://{domain}{path}{query}".lower()
+
+
+def _clean_page_text(value: Any) -> str:
+    text = str(value or "")
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:RESEARCH_PAGE_MAX_CHARS]
+
+
+def _parse_json_object(raw: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(raw)
+        return payload if isinstance(payload, dict) else {}
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+        if not match:
+            return {}
+        try:
+            payload = json.loads(match.group(0))
+            return payload if isinstance(payload, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+
+
+def _clean_items(value: Any, limit: int) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    cleaned: list[str] = []
+    for item in value:
+        text = _trim_text(item, 280)
+        if text and text not in cleaned:
+            cleaned.append(text)
+        if len(cleaned) >= limit:
+            break
+    return cleaned
+
+
+def _trim_text(value: Any, limit: int) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 3].rstrip()}..."
+
+
+def _extraction_has_content(extraction: ResearchExtraction) -> bool:
+    return bool(
+        extraction.summary
+        or extraction.verified_facts
+        or extraction.eligibility_criteria
+        or extraction.support_amounts
+        or extraction.required_documents
+        or extraction.application_steps
+    )
+
+
+def _candidate_lines(page_text: str) -> list[str]:
+    normalized = re.sub(r"\s+", " ", page_text).strip()
+    if not normalized:
+        return []
+    chunks = re.split(r"(?<=[.!?])\s+| [•*] | \| ", normalized)
+    lines = [_trim_text(chunk, 280) for chunk in chunks if len(chunk.strip()) >= 25]
+    return list(dict.fromkeys(lines))
+
+
+def _keyword_items(lines: list[str], keywords: tuple[str, ...], limit: int) -> list[str]:
+    matches = []
+    for line in lines:
+        lowered = line.lower()
+        if any(keyword in lowered for keyword in keywords):
+            matches.append(line)
+        if len(matches) >= limit:
+            break
+    return matches
 
 
 def _search_curated_corpus(question: ResearchQuestion, limit: int = 5) -> list[ResearchSource]:
@@ -460,6 +781,27 @@ def _claim_from_source(source: ResearchSource) -> str:
     if source.source_tier == "high_trust":
         return f"High-trust reference: {label}."
     return f"Verified source: {label}."
+
+
+def _extracted_items(sources: list[ResearchSource], field: str, limit: int) -> list[str]:
+    items: list[str] = []
+    for source in sources:
+        extraction = source.extraction
+        if not extraction:
+            continue
+        values = getattr(extraction, field, [])
+        if not isinstance(values, list):
+            continue
+        for value in values:
+            text = _trim_text(value, 260)
+            if not text:
+                continue
+            item = f"{text} Source: {source.title}."
+            if item not in items:
+                items.append(item)
+            if len(items) >= limit:
+                return items
+    return items
 
 
 def _result(
