@@ -59,6 +59,7 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
   const [speechNotice, setSpeechNotice] = useState<string | null>(null)
   const [reviewing, setReviewing] = useState(false)
   const transcriptRef = useRef<HTMLDivElement>(null)
+  const transcriptInputRef = useRef<HTMLTextAreaElement>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const streamRef = useRef<MediaStream | null>(null)
@@ -91,6 +92,7 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
 
   useEffect(() => {
     if (transcriptRef.current) transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
+    if (transcriptInputRef.current) transcriptInputRef.current.scrollTop = transcriptInputRef.current.scrollHeight
   }, [transcript])
 
   async function startCapture() {
@@ -359,40 +361,65 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
             )}
           </div>
 
-          <div
-            ref={transcriptRef}
-            style={{
-              flex: 1,
-              overflowY: 'auto',
-              minHeight: 0,
-              paddingLeft: spacing.lg,
-              paddingRight: spacing.lg,
-              paddingBottom: spacing.lg,
-            }}
-          >
-            <p style={{
-              margin: 0,
-              fontSize: font.size.sm,
-              color: error ? colors.statusUrgent : transcript ? colors.textPrimary : colors.textDisabled,
-              lineHeight: '1.75',
-              fontWeight: font.weight.regular,
-              whiteSpace: 'pre-wrap',
-            }}>
-              {displayText}
-              {isActive && !error && (
-                <span style={{
-                  display: 'inline-block',
-                  width: 2,
-                  height: '1em',
-                  background: colors.statusUrgent,
-                  marginLeft: 3,
-                  verticalAlign: 'text-bottom',
-                  borderRadius: 1,
-                  animation: 'cur 0.85s step-end infinite',
-                }} />
-              )}
-            </p>
-          </div>
+          {phase === 'done' && sessionId && !error ? (
+            <textarea
+              ref={transcriptInputRef}
+              value={transcript}
+              onChange={event => setTranscript(event.target.value)}
+              aria-label="Edit transcript"
+              style={{
+                flex: 1,
+                minHeight: 0,
+                resize: 'none',
+                border: 'none',
+                outline: 'none',
+                background: 'transparent',
+                paddingLeft: spacing.lg,
+                paddingRight: spacing.lg,
+                paddingBottom: spacing.lg,
+                fontFamily: font.family,
+                fontSize: font.size.sm,
+                color: transcript ? colors.textPrimary : colors.textDisabled,
+                lineHeight: '1.75',
+                fontWeight: font.weight.regular,
+              }}
+            />
+          ) : (
+            <div
+              ref={transcriptRef}
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                minHeight: 0,
+                paddingLeft: spacing.lg,
+                paddingRight: spacing.lg,
+                paddingBottom: spacing.lg,
+              }}
+            >
+              <p style={{
+                margin: 0,
+                fontSize: font.size.sm,
+                color: error ? colors.statusUrgent : transcript ? colors.textPrimary : colors.textDisabled,
+                lineHeight: '1.75',
+                fontWeight: font.weight.regular,
+                whiteSpace: 'pre-wrap',
+              }}>
+                {displayText}
+                {isActive && !error && (
+                  <span style={{
+                    display: 'inline-block',
+                    width: 2,
+                    height: '1em',
+                    background: colors.statusUrgent,
+                    marginLeft: 3,
+                    verticalAlign: 'text-bottom',
+                    borderRadius: 1,
+                    animation: 'cur 0.85s step-end infinite',
+                  }} />
+                )}
+              </p>
+            </div>
+          )}
 
           <div style={{
             position: 'absolute',

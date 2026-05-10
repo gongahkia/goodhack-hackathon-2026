@@ -263,8 +263,20 @@ export default function App() {
     }
   }
 
-  async function handleRecordingComplete(recording: { transcriptionSessionId: string }) {
+  async function handleRecordingComplete(recording: { transcriptionSessionId: string; transcriptId?: string; displayTranscript: string }) {
     try {
+      if (recording.transcriptId && recording.displayTranscript.trim()) {
+        await updateNode(
+          recording.transcriptId,
+          {
+            raw_text: recording.displayTranscript.trim(),
+            normalized_english_text: null,
+            user_edited_text: true,
+            edited_at: new Date().toISOString(),
+          },
+          'edited',
+        )
+      }
       const result = await processTranscription(recording.transcriptionSessionId)
       setReviewInitialTasks(reviewTasksFromProcess(result))
       setReviewOpen(true)

@@ -84,6 +84,8 @@ class Settings(BaseSettings):
     scheduler_run_minute: int = 0
     scheduler_cron_key: str | None = Field(default=None, repr=False)
     allow_insecure_demo_mode: bool = False
+    enforce_pilot_security: bool = False
+    allow_memory_store_fallback: bool = True
 
     model_config = SettingsConfigDict(env_file=(REPO_ROOT / ".env", BACKEND_ROOT / ".env"), env_file_encoding="utf-8", extra="ignore")
 

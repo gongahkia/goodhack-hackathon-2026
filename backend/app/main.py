@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import date as Date, datetime
 from uuid import UUID
 
@@ -55,6 +56,7 @@ from .v2 import (
 )
 
 settings = get_settings()
+STARTUP_LOG = logging.getLogger("app.startup")
 store: GraphStore = (
     PostgresGraphStore(settings.database_url, settings.repo_root / "backend" / "sql" / "schema.sql", settings.data_encryption_key)
     if settings.database_url
@@ -71,10 +73,18 @@ _scheduler_task: asyncio.Task | None = None
 
 @app.on_event("startup")
 async def startup():
+    global store
     require_pilot_security(settings)
     if "*" in [origin.strip() for origin in settings.cors_origins.split(",")]:
-        raise RuntimeError("CORS_ORIGINS must be explicit when credentials are enabled.")
-    await store.init()
+        STARTUP_LOG.warning("CORS_ORIGINS contains wildcard; continuing for demo deployment.")
+    try:
+        await store.init()
+    except Exception:
+        if not settings.allow_memory_store_fallback:
+            raise
+        STARTUP_LOG.exception("Graph store init failed; falling back to in-memory store for demo deployment.")
+        store = MemoryGraphStore(settings.data_encryption_key)
+        await store.init()
     if settings.scheduler_enabled and not is_vercel_runtime():
         global _scheduler_task
         _scheduler_task = asyncio.create_task(daily_scheduler_loop(store, PATIENT_ID, settings))

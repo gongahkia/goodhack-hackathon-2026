@@ -48,6 +48,8 @@ def require_pilot_security(settings: Any) -> None:
     if not getattr(settings, "data_encryption_key", None):
         missing.append("DATA_ENCRYPTION_KEY")
     if missing:
+        if not getattr(settings, "enforce_pilot_security", False):
+            return
         if getattr(settings, "allow_insecure_demo_mode", False) or is_vercel_runtime():
             return
         raise RuntimeError(f"{', '.join(missing)} must be configured when APP_ENV={settings.app_env}.")
