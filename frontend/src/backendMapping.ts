@@ -190,18 +190,18 @@ function recommendationTask(node: BackendNode): Task {
 }
 
 function recommendationNextSteps(node: BackendNode) {
+  const sources = evidenceUrlsByTitle(node.payload.evidence)
   const raw = node.payload.next_steps
   if (Array.isArray(raw)) {
-    return raw.map(item => ({ label: String(item) })).filter(item => item.label.trim())
+    return uniqueSteps(raw.map(item => freeformStep(String(item), sources)).filter((item): item is NextStep => item !== null)).slice(0, 6)
   }
-  const sources = evidenceUrlsByTitle(node.payload.evidence)
-  return [
-    ...prefixedItems(node.payload.application_steps, 'Apply', sources),
-    ...prefixedItems(node.payload.required_documents, 'Prepare', sources),
-    ...prefixedItems(node.payload.eligibility_criteria, 'Check', sources),
-    ...prefixedItems(node.payload.support_amounts, 'Review', sources),
-    ...prefixedItems(node.payload.needs_verification, 'Verify', sources),
-  ].slice(0, 6)
+  return uniqueSteps([
+    ...typedSteps(node.payload.eligibility_criteria, 'Check eligibility', sources, 1),
+    ...typedSteps(node.payload.support_amounts, 'Review support amount', sources, 1),
+    ...typedSteps(node.payload.required_documents, 'Prepare documents', sources, 1),
+    ...typedSteps(node.payload.application_steps, 'Apply', sources, 3),
+    ...typedSteps(node.payload.needs_verification, 'Verify', sources, 1),
+  ]).slice(0, 6)
 }
 
 function recommendationDetail(node: BackendNode): string | undefined {
@@ -212,12 +212,88 @@ function recommendationDetail(node: BackendNode): string | undefined {
   return taskDetail(node)
 }
 
-function prefixedItems(value: unknown, prefix: string, sources: Map<string, string>): NextStep[] {
-  return stringItems(value).map(label => ({ label: `${prefix}: ${label}`, url: sourceUrl(label, sources) }))
+function typedSteps(value: unknown, prefix: string, sources: Map<string, string>, limit: number): NextStep[] {
+  return stringItems(value)
+    .map(item => typedStep(item, prefix, sources))
+    .filter((item): item is NextStep => item !== null)
+    .slice(0, limit)
 }
 
 function stringItems(value: unknown): string[] {
   return Array.isArray(value) ? value.map(item => String(item).trim()).filter(Boolean) : []
+}
+
+function typedStep(value: string, prefix: string, sources: Map<string, string>): NextStep | null {
+  const parsed = splitSource(value)
+  const body = stripStepPrefix(cleanStepText(parsed.body), prefix)
+  if (!body) return null
+  return stepWithSource(`${prefix}: ${capitalizeFirst(body)}`, parsed.sourceTitle, sources)
+}
+
+function freeformStep(value: string, sources: Map<string, string>): NextStep | null {
+  const parsed = splitSource(value)
+  const label = cleanStepText(parsed.body)
+  if (!label) return null
+  return stepWithSource(capitalizeFirst(label), parsed.sourceTitle, sources)
+}
+
+function stepWithSource(label: string, sourceTitle: string | undefined, sources: Map<string, string>): NextStep {
+  return {
+    label,
+    sourceTitle,
+    url: sourceTitle ? sources.get(sourceTitle.toLowerCase()) : undefined,
+    phone: phoneFromText(label),
+  }
+}
+
+function splitSource(value: string): { body: string; sourceTitle?: string } {
+  const match = value.match(/\s+Source:\s*(.+?)\.\s*$/i)
+  if (!match) return { body: value }
+  return { body: value.slice(0, match.index ?? value.length).trim(), sourceTitle: match[1].trim() }
+}
+
+function cleanStepText(value: string): string {
+  let text = value
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/(^|\s)#{1,6}\s+/g, ' ')
+    .replace(/[*_]{1,3}/g, '')
+    .replace(/^\s*(?:[-+]\s+|\d+[.)]\s+)/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  text = text.replace(/^(?:how to apply|application steps?|application process|eligibility(?: criteria)?|required documents?|documents required|support amounts?|amounts?|overview|summary)\s*[:\-\u2013\u2014]?\s*/i, '')
+  return text.replace(/\s+/g, ' ').trim()
+}
+
+function stripStepPrefix(value: string, prefix: string): string {
+  return value
+    .replace(new RegExp(`^${escapeRegExp(prefix)}\\s*[:-]\\s*`, 'i'), '')
+    .replace(/^(?:check|review|prepare|apply|verify)\s*[:-]\s*/i, '')
+    .trim()
+}
+
+function capitalizeFirst(value: string): string {
+  return value ? `${value[0].toUpperCase()}${value.slice(1)}` : value
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function phoneFromText(value: string): string | undefined {
+  const match = value.match(/\b(?:\+65\s*)?\d{4}\s?\d{4}\b/)
+  return match?.[0]
+}
+
+function uniqueSteps(steps: NextStep[]): NextStep[] {
+  const seen = new Set<string>()
+  return steps.filter(step => {
+    const key = step.label.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+    if (!key || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 function evidenceUrlsByTitle(value: unknown): Map<string, string> {
@@ -231,12 +307,6 @@ function evidenceUrlsByTitle(value: unknown): Map<string, string> {
     if (title && url && !urls.has(title.toLowerCase())) urls.set(title.toLowerCase(), url)
   }
   return urls
-}
-
-function sourceUrl(label: string, sources: Map<string, string>): string | undefined {
-  const match = label.match(/\bSource:\s*([^.]+)\./i)
-  if (!match) return undefined
-  return sources.get(match[1].trim().toLowerCase())
 }
 
 function conflictToItem(conflict: ScheduleConflict): ConflictItem | null {

@@ -756,12 +756,29 @@ def _clean_items(value: Any, limit: int) -> list[str]:
         return []
     cleaned: list[str] = []
     for item in value:
-        text = _trim_text(item, 280)
+        text = _trim_text(_clean_extracted_text(item), 280)
         if text and text not in cleaned:
             cleaned.append(text)
         if len(cleaned) >= limit:
             break
     return cleaned
+
+
+def _clean_extracted_text(value: Any) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    text = re.sub(r"(^|\s)#{1,6}\s+", " ", text)
+    text = re.sub(r"[*_]{1,3}", "", text)
+    text = re.sub(r"^\s*(?:[-+]\s+|\d+[.)]\s+)", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(
+        r"^(?:how to apply|application steps?|application process|eligibility(?: criteria)?|required documents?|documents required|support amounts?|amounts?|overview|summary)\s*[:\-\u2013\u2014]?\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _trim_text(value: Any, limit: int) -> str:

@@ -162,7 +162,8 @@ export default function VoiceRecordingPanel({ open, onComplete, onCancel }: Prop
       if (result.display_transcript?.trim()) setTranscript(result.display_transcript.trim())
       setPhase('done')
     } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : 'Audio upload failed')
+      console.warn('Audio upload failed', uploadError)
+      setError('Transcription service unavailable. Try again.')
       setPhase('done')
     }
   }

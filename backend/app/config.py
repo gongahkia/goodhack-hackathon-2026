@@ -1,6 +1,7 @@
 from functools import lru_cache
+from datetime import timezone, timedelta
 from pathlib import Path
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -9,7 +10,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 PATIENT_TZ_NAME = "Asia/Singapore"  # single source of truth for patient-day boundaries
-PATIENT_TZ = ZoneInfo(PATIENT_TZ_NAME)
+try:
+    PATIENT_TZ = ZoneInfo(PATIENT_TZ_NAME)
+except ZoneInfoNotFoundError:
+    PATIENT_TZ = timezone(timedelta(hours=8), PATIENT_TZ_NAME)
 
 
 class Settings(BaseSettings):
@@ -78,6 +82,7 @@ class Settings(BaseSettings):
     scheduler_run_hour: int = 22  # patient-tz hour for daily next-day check
     scheduler_run_minute: int = 0
     scheduler_cron_key: str | None = Field(default=None, repr=False)
+    allow_insecure_demo_mode: bool = False
 
     model_config = SettingsConfigDict(env_file=(REPO_ROOT / ".env", BACKEND_ROOT / ".env"), env_file_encoding="utf-8", extra="ignore")
 

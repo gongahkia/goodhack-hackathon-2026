@@ -62,7 +62,12 @@ export interface DayScheduleResponse {
   calendar_error?: { provider?: string; status_code?: number | null; message?: string } | null
 }
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '')
+function defaultApiBaseUrl() {
+  if (typeof window === 'undefined') return 'http://127.0.0.1:8000'
+  return ['localhost', '127.0.0.1'].includes(window.location.hostname) ? 'http://127.0.0.1:8000' : '/_/backend'
+}
+
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || defaultApiBaseUrl()).replace(/\/$/, '')
 const API_KEY = import.meta.env.VITE_API_KEY || ''
 
 function apiUrl(path: string) {
@@ -75,7 +80,7 @@ async function responseError(response: Response): Promise<string> {
     const parsed = JSON.parse(body) as { detail?: unknown }
     if (typeof parsed.detail === 'string') return parsed.detail
   } catch {}
-  if (body.includes('FUNCTION_INVOCATION_FAILED')) return 'Backend request failed. Restart with make fresh-dev and retry.'
+  if (body.includes('FUNCTION_INVOCATION_FAILED')) return 'Backend deployment failed. Check server logs and retry.'
   return body || `Request failed: ${response.status}`
 }
 
@@ -89,8 +94,8 @@ async function request<T>(path: string, init: RequestInit = {}, timeoutMs = 3000
     if (!response.ok) throw new Error(await responseError(response))
     return response.json() as Promise<T>
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('Backend request timed out. Restart with make fresh-dev and retry.')
-    if (error instanceof TypeError) throw new Error('Backend is unreachable. Check make dev and retry.')
+    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('Backend request timed out. Check server logs and retry.')
+    if (error instanceof TypeError) throw new Error('Backend is unreachable. Check the API process and retry.')
     throw error
   } finally {
     window.clearTimeout(timeout)

@@ -4,6 +4,7 @@ export interface NextStep {
   label: string
   url?: string
   phone?: string
+  sourceTitle?: string
 }
 
 export type RecurrenceMode = 'daily' | 'weekdays' | 'weekly' | 'custom'

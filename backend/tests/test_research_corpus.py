@@ -37,6 +37,20 @@ def test_expanded_grant_catalog_contains_long_term_care_and_training_schemes():
     } <= ids
 
 
+def test_research_extraction_strips_markdown_headings():
+    extraction = research._research_extraction_from_payload(
+        {
+            "relevance_status": "relevant",
+            "application_steps": ["## How to apply Talk to your doctor at the hospital."],
+            "required_documents": ["**Required documents:** NRIC and assessment form."],
+        },
+        Settings(),
+    )
+
+    assert extraction.application_steps == ["Talk to your doctor at the hospital."]
+    assert extraction.required_documents == ["NRIC and assessment form."]
+
+
 @pytest.mark.asyncio
 async def test_research_adapter_uses_curated_corpus_before_live_tools_without_api_keys():
     adapter = DefaultResearchToolAdapter()

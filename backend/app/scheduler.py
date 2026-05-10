@@ -97,7 +97,7 @@ async def build_day_schedule(
 
     return {
         "date": target_date.isoformat(),
-        "timezone": SINGAPORE_TZ.key,
+        "timezone": "Asia/Singapore",
         "items": sorted(items, key=_schedule_item_sort_key),
         "calendar_events": [_calendar_event_payload(event) for event in events],
         "conflicts": conflicts,

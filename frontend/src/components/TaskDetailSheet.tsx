@@ -719,9 +719,14 @@ function NextStepRow({ step, index }: { step: NextStep; index: number }) {
             {step.phone}
           </p>
         )}
+        {step.sourceTitle && (
+          <p style={{ margin: '3px 0 0', fontSize: font.size.xs, color: colors.textSecondary, fontWeight: font.weight.medium }}>
+            Source: {step.sourceTitle}
+          </p>
+        )}
         {step.url && (
           <p style={{ margin: '3px 0 0', fontSize: font.size.xs, color: colors.primary, fontWeight: font.weight.medium }}>
-            Open link ↗
+            Open source ↗
           </p>
         )}
       </div>

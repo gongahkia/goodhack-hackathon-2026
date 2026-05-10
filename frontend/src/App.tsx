@@ -40,6 +40,8 @@ const TABS: { id: TaskCategory; label: string }[] = [
 ]
 
 const CARD_GAP = 12
+let lastLoggedCalendarError: string | null = null
+const reportedResearchErrorKeys = new Set<string>()
 
 function getGreeting() {
   const h = new Date().getHours()
@@ -128,7 +130,15 @@ export default function App() {
       await Promise.allSettled([getScheduleConflicts(), getNotifications()])
       setTasks(prev => tasksFromBackend(schedule, appointments, researchTasks, recommendations, [...prev, ...extraManual]))
       setConflicts(conflictsFromSchedule(schedule))
-      if (schedule.calendar_error) console.warn('Calendar read failed', schedule.calendar_error)
+      if (schedule.calendar_error) {
+        const message = schedule.calendar_error.message || schedule.calendar_error.provider || 'Calendar read failed'
+        if (message !== lastLoggedCalendarError) {
+          console.warn('Calendar read failed', message)
+          lastLoggedCalendarError = message
+        }
+      } else {
+        lastLoggedCalendarError = null
+      }
       setApiError(null)
       const recommendedResearchIds = new Set(
         recommendations.map(node => typeof node.payload.ad_hoc_research_task_id === 'string' ? node.payload.ad_hoc_research_task_id : '').filter(Boolean),
@@ -315,7 +325,12 @@ export default function App() {
         try {
           await runResearchTask(id)
         } catch (error) {
-          console.warn('Research run failed', { id, error })
+          const message = error instanceof Error ? error.message : 'Research run failed'
+          const errorKey = `${id}:${message}`
+          if (!reportedResearchErrorKeys.has(errorKey)) {
+            console.warn('Research run failed', { id, message })
+            reportedResearchErrorKeys.add(errorKey)
+          }
         } finally {
           activeResearchRuns.current.delete(id)
         }
