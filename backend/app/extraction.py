@@ -993,6 +993,7 @@ async def _create_research_task(
     payload = {
         "patient_id": patient_id,
         "display_title": _research_display_title(description),
+        "summary": _research_summary(description),
         "question": _research_question(description),
         "question_redacted": _research_question(actionable.description),
         "source_status": "pending_guardrail",
@@ -1161,4 +1162,31 @@ def _research_display_title(description: str) -> str:
         return "Research financial support options"
     if any(term in lowered for term in ("equipment", "wheelchair", "mobility", "cane", "walker")):
         return "Research equipment support options"
+    topic = _care_topic(description)
+    if topic:
+        return f"Research {topic} care support options"
     return "Research support options"
+
+
+def _research_summary(description: str) -> str:
+    lowered = description.lower()
+    if any(term in lowered for term in ("grant", "subsidy", "subsidies", "careshield", "financial")):
+        return "Review financial support options relevant to the care need in the transcript."
+    if any(term in lowered for term in ("equipment", "wheelchair", "mobility", "cane", "walker")):
+        return "Review equipment and mobility support options relevant to the care need in the transcript."
+    return f"Transcript context: {description}"
+
+
+def _care_topic(description: str) -> str | None:
+    lowered = description.lower()
+    for part in BODY_PARTS:
+        match = re.search(rf"\b(left|right)\s+{re.escape(part)}\b", lowered)
+        if match:
+            return match.group(0)
+    for part in BODY_PARTS:
+        if re.search(rf"\b{re.escape(part)}\b", lowered):
+            return part
+    for condition in CONDITIONS:
+        if re.search(rf"\b{re.escape(condition)}\b", lowered):
+            return condition
+    return None

@@ -454,8 +454,10 @@ def _dedupe_sources(sources: list[ResearchSource]) -> list[ResearchSource]:
 
 async def _search_live_web(question: ResearchQuestion, settings: Settings, domains: list[str]) -> list[ResearchSource]:
     sources: list[ResearchSource] = []
-    exa = await exa_search_web(question.query, settings, domains, num_results=5)
-    tiny = await tinyfish_search_web(question.query, settings, domains)
+    exa, tiny = await asyncio.gather(
+        exa_search_web(question.query, settings, domains, num_results=5),
+        tinyfish_search_web(question.query, settings, domains),
+    )
     for item in exa.get("results", []):
         sources.append(_source_from_result(item, str(item.get("provider") or exa.get("provider") or "exa"), question.source_policy))
     for item in tiny.get("results", []):
@@ -554,11 +556,10 @@ async def _extract_research_pages_with_openai(
         return {}
 
     client = AsyncOpenAI(api_key=settings.openai_api_key)
-    attempts: dict[str, ExtractionAttempt] = {}
-    for page in pages:
-        key = _page_source_key(page)
-        attempts[key] = await _extract_single_research_page_with_openai(question, page, settings, client)
-    return attempts
+    results = await asyncio.gather(
+        *[_extract_single_research_page_with_openai(question, page, settings, client) for page in pages],
+    )
+    return {_page_source_key(page): result for page, result in zip(pages, results)}
 
 
 async def _extract_single_research_page_with_openai(

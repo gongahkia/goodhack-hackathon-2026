@@ -114,6 +114,8 @@ export default function App() {
   const [containerWidth, setContainerWidth] = useState(361)
   const touchStart = useRef<{ x: number; y: number } | null>(null)
   const lockDir = useRef<'h' | 'v' | null>(null)
+  const activeResearchRuns = useRef(new Set<string>())
+  const researchRunAttempts = useRef(new Map<string, number>())
 
   async function refreshFromBackend(extraManual: Task[] = []) {
     try {
@@ -128,6 +130,18 @@ export default function App() {
       setConflicts(conflictsFromSchedule(schedule))
       if (schedule.calendar_error) console.warn('Calendar read failed', schedule.calendar_error)
       setApiError(null)
+      const recommendedResearchIds = new Set(
+        recommendations.map(node => typeof node.payload.ad_hoc_research_task_id === 'string' ? node.payload.ad_hoc_research_task_id : '').filter(Boolean),
+      )
+      const runnableResearchIds = researchTasks
+        .filter(node => node.status === 'approved')
+        .filter(node => !recommendedResearchIds.has(node.id))
+        .filter(node => {
+          const status = typeof node.payload.source_status === 'string' ? node.payload.source_status : ''
+          return status === 'pending_guardrail' || status === 'research_failed'
+        })
+        .map(node => node.id)
+      void runResearchIds(runnableResearchIds)
     } catch (error) {
       setApiError(error instanceof Error ? error.message : 'Backend request failed')
     }
@@ -144,6 +158,19 @@ export default function App() {
   useEffect(() => {
     void refreshFromBackend()
   }, [])
+
+  useEffect(() => {
+    const pending = tasks.some(t => t.backendType === 'ad_hoc_research_task' && !t.recommendationId && t.researchStatus !== 'research_completed')
+    if (!pending) return
+    const id = window.setInterval(() => void refreshFromBackend(), 12000)
+    return () => window.clearInterval(id)
+  }, [tasks])
+
+  useEffect(() => {
+    if (!selectedTask) return
+    const latest = tasks.find(t => t.id === selectedTask.id)
+    if (latest) setSelectedTask(latest)
+  }, [tasks, selectedTask?.id])
 
   const tabIndex = tab === 'daily' ? 0 : 1
   const slideUnit = containerWidth + CARD_GAP
@@ -273,7 +300,27 @@ export default function App() {
   async function runConfirmedResearch(items: Task[]) {
     const ids = items.filter(t => t.backendType === 'ad_hoc_research_task' && t.backendNodeId).map(t => t.backendNodeId!)
     if (!ids.length) return
-    await Promise.allSettled(ids.map(runResearchTask))
+    await runResearchIds(ids)
+  }
+
+  async function runResearchIds(ids: string[]) {
+    const runnable = ids.filter(id => !activeResearchRuns.current.has(id) && (researchRunAttempts.current.get(id) ?? 0) < 2)
+    if (!runnable.length) return
+    runnable.forEach(id => {
+      activeResearchRuns.current.add(id)
+      researchRunAttempts.current.set(id, (researchRunAttempts.current.get(id) ?? 0) + 1)
+    })
+    await Promise.allSettled(
+      runnable.map(async id => {
+        try {
+          await runResearchTask(id)
+        } catch (error) {
+          console.warn('Research run failed', { id, error })
+        } finally {
+          activeResearchRuns.current.delete(id)
+        }
+      }),
+    )
     await refreshFromBackend()
   }
 

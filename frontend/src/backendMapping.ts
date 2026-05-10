@@ -1,6 +1,6 @@
 import type { BackendNode, DayScheduleResponse, ProcessTranscriptionResponse, ScheduleConflict } from './api'
 import type { ConflictItem } from './components/ConflictPanel'
-import type { Task } from './types'
+import type { NextStep, Task } from './types'
 
 function str(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
@@ -88,6 +88,7 @@ export function tasksFromBackend(
 ): Task[] {
   const completed = new Map(previous.filter(t => t.backendNodeId).map(t => [t.backendNodeId, t.completed]))
   const manual = previous.filter(t => !t.backendNodeId)
+  const researchedIds = new Set(recommendations.map(node => str(node.payload.ad_hoc_research_task_id)).filter(Boolean))
   const backendTasks = [
     ...schedule.items.map(item => ({
       id: item.node_id,
@@ -103,7 +104,7 @@ export function tasksFromBackend(
       backendStatus: item.status,
     })),
     ...appointments.map(appointmentTask),
-    ...researchTasks.map(researchTask),
+    ...researchTasks.filter(node => !researchedIds.has(node.id)).map(researchTask),
     ...recommendations.map(recommendationTask),
   ].map(task => ({ ...task, completed: task.backendNodeId ? completed.get(task.backendNodeId) ?? task.completed : task.completed }))
   return [...backendTasks, ...manual]
@@ -154,16 +155,25 @@ function appointmentTask(node: BackendNode): Task {
 function researchTask(node: BackendNode): Task {
   const question = str(node.payload.question)
   const basis = str(node.payload.basis) ?? cleanResearchQuestion(question)
+  const status = str(node.payload.source_status) ?? str(node.payload.research_status) ?? node.status
+  const pending = status === 'pending_guardrail' || status === 'pending_review'
   return {
     id: node.id,
     category: 'adhoc',
     title: str(node.payload.display_title) ?? str(node.payload.title) ?? 'Research support options',
-    detail: str(node.payload.summary) ?? (basis ? `Checking support options for: ${compact(basis)}` : taskDetail(node)),
+    detail: pending ? 'Research is queued. Live search and guardrail checks will update this card when ready.' : str(node.payload.summary) ?? (basis ? compact(basis) : taskDetail(node)),
     completed: false,
-    researchStatus: str(node.payload.research_status) ?? node.status,
-    nextSteps: [{ label: node.status === 'approved' ? 'Research ready' : 'Research running' }],
+    researchStatus: status,
+    nextSteps: [{ label: researchStepLabel(status) }],
     ...nodeBase(node),
   }
+}
+
+function researchStepLabel(status: string): string {
+  if (status === 'research_completed') return 'Research ready'
+  if (status === 'blocked_by_guardrail' || status === 'blocked_by_sealion_guardrail') return 'Research blocked'
+  if (status === 'research_failed') return 'Research failed'
+  return 'Research queued'
 }
 
 function recommendationTask(node: BackendNode): Task {
@@ -171,7 +181,7 @@ function recommendationTask(node: BackendNode): Task {
     id: node.id,
     category: 'adhoc',
     title: str(node.payload.title) ?? 'Recommendation',
-    detail: taskDetail(node),
+    detail: recommendationDetail(node),
     completed: false,
     recommendationId: node.id,
     nextSteps: recommendationNextSteps(node),
@@ -184,7 +194,49 @@ function recommendationNextSteps(node: BackendNode) {
   if (Array.isArray(raw)) {
     return raw.map(item => ({ label: String(item) })).filter(item => item.label.trim())
   }
-  return []
+  const sources = evidenceUrlsByTitle(node.payload.evidence)
+  return [
+    ...prefixedItems(node.payload.application_steps, 'Apply', sources),
+    ...prefixedItems(node.payload.required_documents, 'Prepare', sources),
+    ...prefixedItems(node.payload.eligibility_criteria, 'Check', sources),
+    ...prefixedItems(node.payload.support_amounts, 'Review', sources),
+    ...prefixedItems(node.payload.needs_verification, 'Verify', sources),
+  ].slice(0, 6)
+}
+
+function recommendationDetail(node: BackendNode): string | undefined {
+  const facts = stringItems(node.payload.verified_facts)
+  if (facts.length) return compact(facts.slice(0, 2).join(' '))
+  const criteria = stringItems(node.payload.eligibility_criteria)
+  if (criteria.length) return compact(criteria.slice(0, 2).join(' '))
+  return taskDetail(node)
+}
+
+function prefixedItems(value: unknown, prefix: string, sources: Map<string, string>): NextStep[] {
+  return stringItems(value).map(label => ({ label: `${prefix}: ${label}`, url: sourceUrl(label, sources) }))
+}
+
+function stringItems(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(item => String(item).trim()).filter(Boolean) : []
+}
+
+function evidenceUrlsByTitle(value: unknown): Map<string, string> {
+  const urls = new Map<string, string>()
+  if (!Array.isArray(value)) return urls
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue
+    const evidence = item as Record<string, unknown>
+    const title = str(evidence.title)
+    const url = str(evidence.url)
+    if (title && url && !urls.has(title.toLowerCase())) urls.set(title.toLowerCase(), url)
+  }
+  return urls
+}
+
+function sourceUrl(label: string, sources: Map<string, string>): string | undefined {
+  const match = label.match(/\bSource:\s*([^.]+)\./i)
+  if (!match) return undefined
+  return sources.get(match[1].trim().toLowerCase())
 }
 
 function conflictToItem(conflict: ScheduleConflict): ConflictItem | null {

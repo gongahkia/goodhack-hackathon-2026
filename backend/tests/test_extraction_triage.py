@@ -114,6 +114,22 @@ async def test_information_sheet_request_surfaces_as_reviewable_research_task():
 
 
 @pytest.mark.asyncio
+async def test_triaged_research_task_has_context_preserving_review_copy():
+    store = MemoryGraphStore()
+    transcript = await _transcript(store, "Auntie Lim needs to have her left knee amputated six months from now.")
+    redaction = await redact_stored_transcript(store, transcript)
+
+    result = await process_redacted_transcript(store, redaction, reference_date=date(2026, 5, 10))
+
+    assert result["daily_tasks"] == []
+    assert result["appointment_candidates"] == []
+    assert len(result["ad_hoc_research_tasks"]) == 1
+    research = result["ad_hoc_research_tasks"][0]["payload"]
+    assert research["display_title"] == "Research left knee care support options"
+    assert research["summary"] == "Transcript context: Auntie Lim needs to have her left knee amputated six months from now"
+
+
+@pytest.mark.asyncio
 async def test_month_day_year_appointment_requires_calendar_write():
     store = MemoryGraphStore()
     transcript = await _transcript(store, "John has a doctor appointment on June 1, 2026 at 10am.")

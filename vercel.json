@@ -1,0 +1,29 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "experimentalServices": {
+    "frontend": {
+      "entrypoint": "frontend",
+      "routePrefix": "/",
+      "framework": "vite"
+    },
+    "backend": {
+      "entrypoint": "backend/main.py",
+      "routePrefix": "/_/backend",
+      "framework": "fastapi",
+      "memory": 2048,
+      "maxDuration": 300,
+      "includeFiles": [
+        "backend/**",
+        "data/**"
+      ],
+      "excludeFiles": [
+        "backend/.venv/**",
+        "backend/.pytest_cache/**",
+        "backend/tests/**",
+        "frontend/**",
+        "docs/**",
+        "**/__pycache__/**"
+      ]
+    }
+  }
+}
