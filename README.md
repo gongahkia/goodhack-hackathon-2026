@@ -34,6 +34,7 @@
 
 * [💡 Introduction](#-introduction)
 * [🔮 Features](#-features)
+* [👥 Team Members](#-team-members)
 * [🏗️ Architecture and Ecosystem](#️-architecture-and-ecosystem)
 * [🌟 Star History](#-star-history)
 * [🗺️ Roadmap](#️-roadmap)
@@ -44,14 +45,6 @@
   * [Verification](#verification)
 * [📡 API Surface](#-api-surface)
 * [🛠️ Development Guide](#️-development-guide)
-* [❓ FAQ](#-faq)
-  * [What is the source of truth?](#what-is-the-source-of-truth)
-  * [How is sensitive data handled?](#how-is-sensitive-data-handled)
-  * [Does the app write to Google Calendar automatically?](#does-the-app-write-to-google-calendar-automatically)
-  * [Does live transcription stream partial words?](#does-live-transcription-stream-partial-words)
-  * [Where are graph records stored?](#where-are-graph-records-stored)
-* [🙏 Acknowledgement](#-acknowledgement)
-  * [Contributors](#contributors)
 
 ---
 
@@ -60,10 +53,6 @@
 Caregiver Companion converts caregiver audio or transcripts into auditable care actions.
 
 The backend stores transcript sessions, redacts direct PII before downstream model/tool work, extracts care entities, triages them into daily tasks, appointment candidates, and guarded research tasks, then persists the lineage as graph nodes, edges, and reasoning logs.
-
-![Project Architecture](docs/project-architecture-diagram.svg)
-
-![Project Data Flow](docs/project-data-flow-diagram.svg)
 
 ## 🔮 Features
 
@@ -100,6 +89,47 @@ The backend stores transcript sessions, redacts direct PII before downstream mod
   * Capture/review/task/notification-oriented UI
   * Browser live-caption fallback contract
 
+## 👥 Team members
+
+<table>
+	<tbody>
+        <tr>
+            <td align="center">
+                <a href="https://github.com/gongahkia">
+                    <img src="https://avatars.githubusercontent.com/u/117062305?v=4" width="100;" alt="gongahkia"/>
+                    <br />
+                    <sub><b>Gabriel Ong</b></sub>
+                </a>
+                <br />
+            </td>
+            <td align="center">
+                <a href="https://github.com/kopicplusplus">
+                    <img src="https://avatars.githubusercontent.com/u/262940233?v=4" width="100;" alt=""/>
+                    <br />
+                    <sub><b>Keith Tang</b></sub>
+                </a>
+                <br />
+            </td>
+            <td align="center">
+                <a href="https://www.linkedin.com/in/leeziqikarin/">
+                    <img src="https://media.licdn.com/dms/image/v2/D5603AQFa8pAQPkSi5g/profile-displayphoto-crop_800_800/B56ZmWS4x.J4AI-/0/1759163160813?e=1780531200&v=beta&t=7nx-On5k51LBiJ4r0j-1x50iQ9Q3_al8tYSxK__o4fI" width="100;" alt=""/>
+                    <br />
+                    <sub><b>Karin Lee</b></sub>
+                </a>
+                <br />
+            </td>
+            <td align="center">
+                <a href="https://github.com/a-stint">
+                    <img src="https://avatars.githubusercontent.com/u/149822619?v=4" width="100;" alt=""/>
+                    <br />
+                    <sub><b>Astin Tay</b></sub>
+                </a>
+                <br />
+            </td> 
+        </tr>
+	</tbody>
+</table>
+
 ## 🏗️ Architecture and Ecosystem
 
 | Project | Description | Entry Point |
@@ -115,15 +145,9 @@ The backend stores transcript sessions, redacts direct PII before downstream mod
 | Frontend | React app | [`frontend/src/App.tsx`](frontend/src/App.tsx) |
 | Demo Runbook | Full demo and live E2E notes | [`docs/DEMO.md`](docs/DEMO.md) |
 
-## 🌟 Star History
+![Project Architecture](docs/project-architecture-diagram.svg)
 
-<a href="https://star-history.com/#gongahkia/goodhack-hackathon-2026&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=gongahkia/goodhack-hackathon-2026&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=gongahkia/goodhack-hackathon-2026&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=gongahkia/goodhack-hackathon-2026&type=Date" />
- </picture>
-</a>
+![Project Data Flow](docs/project-data-flow-diagram.svg)
 
 ## 🗺️ Roadmap
 
@@ -260,35 +284,3 @@ Focused backend suite:
 ```bash
 TINYFISH_API_KEY= SEALION_API_KEY= backend/.venv/bin/python -m pytest backend/tests
 ```
-
-## ❓ FAQ
-
-### What is the source of truth?
-
-Caregiver audio or transcript input. The graph starts from `transcription_session` and `transcript` nodes, not legacy demo records.
-
-### How is sensitive data handled?
-
-Direct PII is redacted locally before downstream extraction, triage, research, guardrail, and synthesis work. User-facing task artifacts are rehydrated locally before response.
-
-### Does the app write to Google Calendar automatically?
-
-No. Daily tasks stay inside Caregiver Companion. Fixed-date appointment candidates require `POST /appointments/{appointment_id}/approve-calendar-write` before a Google Calendar write.
-
-### Does live transcription stream partial words?
-
-No. The backend WebSocket is batch-on-commit. Browser clients can show local speech-recognition captions first, then replace them with the canonical backend transcript after commit.
-
-### Where are graph records stored?
-
-In memory by default. Set `DATABASE_URL` to persist nodes, edges, reasoning logs, and state in Postgres.
-
-## 🙏 Acknowledgement
-
-Built with FastAPI, React, Vite, OpenAI transcription, and optional regional review/research/calendar integrations.
-
-### Contributors
-
-<a href="https://github.com/gongahkia/goodhack-hackathon-2026/graphs/contributors">
-   <img src="https://contrib.rocks/image?repo=gongahkia/goodhack-hackathon-2026" />
-</a>
