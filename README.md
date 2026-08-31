@@ -1,15 +1,10 @@
 <p align="center">
 <img alt="Caregiver Companion" src="asset/logo/hug.png" width="128">
 <br>
+<b>Handoff</b>
+<br>
 <em>Transcript-first caregiver workflows</em>
 <br><br>
-<a title="Last Commit" target="_blank" href="https://github.com/gongahkia/goodhack-hackathon-2026/commits/main"><img src="https://img.shields.io/github/last-commit/gongahkia/goodhack-hackathon-2026.svg?style=flat-square&color=FF9900"></a>
-<a title="GitHub Commits" target="_blank" href="https://github.com/gongahkia/goodhack-hackathon-2026/commits/main"><img src="https://img.shields.io/github/commit-activity/m/gongahkia/goodhack-hackathon-2026.svg?style=flat-square"></a>
-<br>
-<a title="Code Size" target="_blank" href="https://github.com/gongahkia/goodhack-hackathon-2026"><img src="https://img.shields.io/github/languages/code-size/gongahkia/goodhack-hackathon-2026.svg?style=flat-square&color=yellow"></a>
-<a title="Repository Size" target="_blank" href="https://github.com/gongahkia/goodhack-hackathon-2026"><img src="https://img.shields.io/github/repo-size/gongahkia/goodhack-hackathon-2026.svg?style=flat-square&color=blueviolet"></a>
-<a title="GitHub Pull Requests" target="_blank" href="https://github.com/gongahkia/goodhack-hackathon-2026/pulls"><img src="https://img.shields.io/github/issues-pr-closed/gongahkia/goodhack-hackathon-2026.svg?style=flat-square&color=FF9966"></a>
-<br>
 <a title="FastAPI" target="_blank" href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/backend-FastAPI-009688?style=flat-square"></a>
 <a title="React and Vite" target="_blank" href="https://vite.dev/"><img src="https://img.shields.io/badge/frontend-React%20%2B%20Vite-61DAFB?style=flat-square"></a>
 <a title="Python" target="_blank" href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12-3776AB?style=flat-square"></a>
