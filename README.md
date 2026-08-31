@@ -3,7 +3,6 @@
 <br>
 <em>Transcript-first caregiver workflows</em>
 <br><br>
-<a title="Build Status" target="_blank" href="https://github.com/gongahkia/goodhack-hackathon-2026/actions/workflows/backend-ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/gongahkia/goodhack-hackathon-2026/backend-ci.yml?style=flat-square"></a>
 <a title="Last Commit" target="_blank" href="https://github.com/gongahkia/goodhack-hackathon-2026/commits/main"><img src="https://img.shields.io/github/last-commit/gongahkia/goodhack-hackathon-2026.svg?style=flat-square&color=FF9900"></a>
 <a title="GitHub Commits" target="_blank" href="https://github.com/gongahkia/goodhack-hackathon-2026/commits/main"><img src="https://img.shields.io/github/commit-activity/m/gongahkia/goodhack-hackathon-2026.svg?style=flat-square"></a>
 <br>
